@@ -1,0 +1,18 @@
+{
+  "_comment": "mock-qt 模拟行为配置，仅用于开发联调，不得用于生产环境",
+
+  "port": 9000,
+
+  "ai_callback_url": "http://localhost:8000/api/device/callback",
+
+  "execution_delay_ms": 2000,
+
+  "failure_rate": 0.05,
+
+  "simulate_actual_mass": true,
+  "actual_mass_deviation_pct": 0.3,
+
+  "log_all_commands": true,
+
+  "simulate_formula_step_delay_ms": 1500
+}

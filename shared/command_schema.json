@@ -1,0 +1,401 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dispenser-ai/command_schema.json",
+  "title": "DispenserCommand",
+  "description": "AI交互层下发给C++后级控制程序的标准指令格式 v2.1",
+  "version": "2.1",
+  "type": "object",
+  "required": ["schema_version", "command_id", "timestamp", "operator_id", "command_type", "payload"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2.1",
+      "description": "协议版本号，破坏性变更升major，新增可选字段升minor"
+    },
+    "command_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "全局唯一指令ID (UUID v4)，C++控制层用于幂等去重"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AI层生成指令的时间，ISO 8601含时区，例：2026-04-03T10:30:00+08:00"
+    },
+    "operator_id": {
+      "type": "string",
+      "description": "当前操作员标识（开发阶段默认 admin）"
+    },
+    "command_type": {
+      "type": "string",
+      "enum": ["dispense", "aliquot", "mix", "formula", "query_stock", "restock", "cancel", "emergency_stop", "device_status"],
+      "description": "指令类型枚举"
+    },
+    "payload": {
+      "type": "object",
+      "description": "指令参数，结构因command_type而异，见下方definitions"
+    },
+    "confirmation": {
+      "type": "object",
+      "description": "用户确认信息，操作类指令必填（dispense/aliquot/mix/formula/restock）",
+      "required": ["method", "confirmed_at"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["voice", "screen"],
+          "description": "voice=语音确认, screen=屏幕点击确认"
+        },
+        "confirmed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "用户确认时间"
+        }
+      }
+    }
+  },
+
+  "definitions": {
+
+    "reagent_full": {
+      "type": "object",
+      "description": "完整药品/试剂信息，来自数据库查询结果，随指令下发给控制层",
+      "required": ["reagent_code", "reagent_name_cn"],
+      "properties": {
+        "reagent_code": {
+          "type": "string",
+          "description": "试剂唯一编码，主键，如 NaCl-AR。格式建议：{化学式或缩写}-{纯度级别}"
+        },
+        "reagent_name_cn": {
+          "type": "string",
+          "description": "试剂中文名称，如 氯化钠"
+        },
+        "reagent_name_en": {
+          "type": "string",
+          "description": "试剂英文名称，如 Sodium Chloride"
+        },
+        "reagent_name_formula": {
+          "type": "string",
+          "description": "化学式，如 NaCl"
+        },
+        "reagent_aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "别名列表，用于模糊匹配，如 [\"食盐\", \"盐\", \"sodium chloride\", \"table salt\"]"
+        },
+        "cas_number": {
+          "type": "string",
+          "description": "CAS登记号，如 7647-14-5，可选"
+        },
+        "purity_grade": {
+          "type": "string",
+          "description": "纯度等级，如 AR（分析纯）、GR（优级纯）、CP（化学纯）",
+          "examples": ["AR", "GR", "CP", "HPLC", "USP"]
+        },
+        "molar_weight_g_mol": {
+          "type": "number",
+          "minimum": 0,
+          "description": "摩尔质量，单位 g/mol，由操作员在药品库中预设，LLM不得自行生成此值"
+        },
+        "density_g_cm3": {
+          "type": "number",
+          "minimum": 0,
+          "description": "密度，单位 g/cm³，粉末堆密度，可选，用于容量估算"
+        },
+        "station_id": {
+          "type": "string",
+          "description": "当前所在工位编号，如 station_3，由视觉识别或人工录入维护"
+        },
+        "stock_mg": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "当前库存量，单位 mg，由系统根据入库/出库记录维护"
+        },
+        "notes": {
+          "type": "string",
+          "description": "备注，如危险品提示、特殊存储要求等，可选"
+        }
+      }
+    },
+
+    "mass_fields": {
+      "description": "质量相关字段复用定义",
+      "properties": {
+        "target_mass_mg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "目标质量，单位 mg，正整数"
+        },
+        "tolerance_mg": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "允许误差，单位 mg，非负整数。天平分辨率 0.1mg，建议不小于 1"
+        }
+      }
+    },
+
+    "payload_dispense": {
+      "type": "object",
+      "description": "单步称量分装：取一种试剂，称量至目标质量，放入目标容器",
+      "required": ["reagent_code", "reagent_name_cn", "target_mass_mg", "tolerance_mg", "target_vessel"],
+      "properties": {
+        "reagent_code":     { "type": "string", "description": "试剂唯一编码" },
+        "reagent_name_cn":  { "type": "string", "description": "试剂中文名（冗余，方便控制层日志展示）" },
+        "reagent_name_en":  { "type": "string", "description": "试剂英文名，可选" },
+        "reagent_name_formula": { "type": "string", "description": "化学式，可选" },
+        "molar_weight_g_mol": { "type": "number", "minimum": 0, "description": "摩尔质量，可选，来自药品库" },
+        "purity_grade":     { "type": "string", "description": "纯度等级，可选" },
+        "station_id":       { "type": "string", "description": "试剂所在工位" },
+        "target_mass_mg":   { "type": "integer", "minimum": 1, "description": "目标质量，单位 mg" },
+        "tolerance_mg":     { "type": "integer", "minimum": 0, "description": "允许误差，单位 mg" },
+        "target_vessel":    { "type": "string", "description": "目标容器编号，如 A1, B3, main" },
+        "notes":            { "type": "string", "default": "" }
+      },
+      "example": {
+        "reagent_code": "NaCl-AR",
+        "reagent_name_cn": "氯化钠",
+        "reagent_name_en": "Sodium Chloride",
+        "reagent_name_formula": "NaCl",
+        "molar_weight_g_mol": 58.44,
+        "purity_grade": "AR",
+        "station_id": "station_3",
+        "target_mass_mg": 500,
+        "tolerance_mg": 5,
+        "target_vessel": "A1",
+        "notes": ""
+      }
+    },
+
+    "payload_aliquot": {
+      "type": "object",
+      "description": "分料：将一种试剂分装为 N 等份",
+      "required": ["reagent_code", "reagent_name_cn", "portions", "mass_per_portion_mg", "tolerance_mg", "target_vessels"],
+      "properties": {
+        "reagent_code":     { "type": "string" },
+        "reagent_name_cn":  { "type": "string" },
+        "reagent_name_en":  { "type": "string" },
+        "reagent_name_formula": { "type": "string" },
+        "purity_grade":     { "type": "string" },
+        "station_id":       { "type": "string" },
+        "portions": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 30,
+          "description": "份数，2~30"
+        },
+        "mass_per_portion_mg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "每份目标质量，单位 mg"
+        },
+        "tolerance_mg": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "每份允许误差，单位 mg"
+        },
+        "target_vessels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 2,
+          "description": "容器编号列表，长度必须等于 portions"
+        },
+        "notes": { "type": "string", "default": "" }
+      }
+    },
+
+    "mix_component": {
+      "type": "object",
+      "description": "混合配方中的单个组分，质量分数和摩尔分数共用此结构",
+      "required": ["reagent_code", "reagent_name_cn", "fraction", "calculated_mass_mg", "tolerance_mg"],
+      "properties": {
+        "reagent_code":         { "type": "string" },
+        "reagent_name_cn":      { "type": "string" },
+        "reagent_name_en":      { "type": "string" },
+        "reagent_name_formula": { "type": "string" },
+        "purity_grade":         { "type": "string" },
+        "station_id":           { "type": "string" },
+        "molar_weight_g_mol": {
+          "type": "number",
+          "minimum": 0,
+          "description": "摩尔质量，单位 g/mol。ratio_type=molar_fraction 时必填，来自药品库"
+        },
+        "fraction": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "该组分占比（质量分数或摩尔分数），0~1，所有组分之和=1.0"
+        },
+        "calculated_mass_mg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "AI层已换算好的实际称量质量（mg），C++控制层直接使用，无需重新计算"
+        },
+        "tolerance_mg": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "payload_mix": {
+      "type": "object",
+      "description": "混合配方：多种试剂按比例混合到一个容器",
+      "required": ["total_mass_mg", "ratio_type", "components", "target_vessel", "execution_mode"],
+      "properties": {
+        "formula_name": {
+          "type": "string",
+          "description": "配方名称，可选"
+        },
+        "total_mass_mg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "混合物总目标质量，单位 mg。各组分 calculated_mass_mg 之和应等于此值（±1mg容差）"
+        },
+        "ratio_type": {
+          "type": "string",
+          "enum": ["mass_fraction", "molar_fraction"],
+          "description": "mass_fraction=质量分数, molar_fraction=摩尔分数（需要 molar_weight_g_mol）"
+        },
+        "components": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/definitions/mix_component" },
+          "description": "组分列表，至少2个"
+        },
+        "target_vessel":   { "type": "string", "description": "目标容器编号" },
+        "execution_mode": {
+          "type": "string",
+          "enum": ["sequential"],
+          "description": "当前版本固定 sequential（逐步执行，按 components 顺序）"
+        }
+      }
+    },
+
+    "formula_step": {
+      "type": "object",
+      "description": "多步配方中的单个步骤",
+      "required": ["step_index", "command_type", "payload"],
+      "properties": {
+        "step_index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "步骤序号，从1开始，连续递增"
+        },
+        "step_name": {
+          "type": "string",
+          "description": "步骤描述，可选，用于日志展示"
+        },
+        "command_type": {
+          "type": "string",
+          "enum": ["dispense", "aliquot", "mix"],
+          "description": "子步骤类型，只允许 dispense / aliquot / mix"
+        },
+        "payload": {
+          "type": "object",
+          "description": "对应 command_type 的 payload，结构见对应 payload_* 定义"
+        }
+      }
+    },
+
+    "payload_formula": {
+      "type": "object",
+      "description": "多步配方：按顺序执行多个 dispense/aliquot/mix 步骤",
+      "required": ["steps", "execution_mode", "on_step_failure"],
+      "properties": {
+        "formula_name": { "type": "string", "description": "配方名称" },
+        "formula_id": {
+          "type": ["string", "null"],
+          "description": "配方库ID，来自数据库时填写，临时配方为 null"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/formula_step" }
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": ["sequential"],
+          "description": "当前版本固定 sequential"
+        },
+        "on_step_failure": {
+          "type": "string",
+          "enum": ["pause_and_notify", "abort_all"],
+          "description": "步骤失败策略：pause_and_notify=暂停并通知AI层等待处理，abort_all=立即中止全部"
+        }
+      }
+    },
+
+    "payload_query_stock": {
+      "type": "object",
+      "description": "查询库存。reagent_code 和 reagent_name_cn 至少提供一个；均为空则返回全部库存",
+      "properties": {
+        "reagent_code": {
+          "type": "string",
+          "description": "试剂编码，精确匹配"
+        },
+        "reagent_name_cn": {
+          "type": "string",
+          "description": "试剂中文名，模糊匹配"
+        }
+      }
+    },
+
+    "payload_restock": {
+      "type": "object",
+      "description": "试剂入库，更新库存量",
+      "required": ["reagent_code", "reagent_name_cn", "added_mass_mg", "station_id"],
+      "properties": {
+        "reagent_code":    { "type": "string" },
+        "reagent_name_cn": { "type": "string" },
+        "added_mass_mg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "本次入库质量，单位 mg"
+        },
+        "station_id": {
+          "type": "string",
+          "description": "存放工位编号"
+        },
+        "notes": { "type": "string", "default": "" }
+      }
+    },
+
+    "payload_cancel": {
+      "type": "object",
+      "description": "取消正在执行的指令",
+      "required": ["target_command_id"],
+      "properties": {
+        "target_command_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "要取消的指令的 command_id"
+        },
+        "cancel_reason": {
+          "type": "string",
+          "description": "取消原因，可选"
+        }
+      }
+    }
+  },
+
+  "_version_history": [
+    {
+      "version": "1.0",
+      "date": "2026-04-03",
+      "changes": "初始版本，支持 dispense/aliquot/mix/formula/query_stock/restock/cancel/emergency_stop/device_status"
+    },
+    {
+      "version": "2.0",
+      "date": "2026-04-09",
+      "changes": "与 command_protocol.md v2.0 对齐；明确意图层(intent_json)与执行层(command)分离；schema_version const 值同步"
+    },
+    {
+      "version": "2.1",
+      "date": "2026-04-09",
+      "changes": "全链路单位统一为 mg 整数；扩展药品/试剂字段（reagent_name_cn/en/formula/aliases/cas_number/purity_grade/molar_weight_g_mol/density/station_id/stock_mg）；mix_component 合并质量分数与摩尔分数为统一结构；payload_dispense/aliquot 补充完整试剂字段；新增 payload_restock 完整定义；_contact 更新控制层为 C++ 程序"
+    }
+  ],
+
+  "_contact": {
+    "ai_layer": "软件团队（Python/FastAPI）",
+    "control_layer": "硬件/嵌入式团队（C++ 后级控制程序）",
+    "balance_interface": "AI层直接通过 RS422-USB 读取天平(MT-SICS)，实时数据经 WebSocket 推送前端；称重结果由 C++ 控制层通过 TCP 回调",
+    "change_policy": "minor升级新增可选字段，向后兼容；major升级双方必须同时升级，提前1周通知"
+  }
+}

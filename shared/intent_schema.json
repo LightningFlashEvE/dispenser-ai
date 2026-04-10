@@ -1,0 +1,233 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dispenser-ai/intent_schema.json",
+  "title": "DispenserIntent",
+  "description": "LLM输出的任务意图JSON格式定义 v1.0。此格式仅用于AI层内部流转（LLM→规则引擎），不直接下发给C++控制层。",
+  "version": "1.0",
+
+  "_design_note": "intent_json 与 command_schema.json 的区别：intent_json 是语义层，描述用户意图，字段由LLM填写，不保证药品存在性/工位合法性/数值精度；command_schema.json 是执行层，经规则引擎+状态机校验后才生成，字段值来自数据库查询结果。",
+
+  "type": "object",
+  "required": ["schema_version", "intent_id", "intent_type", "timestamp"],
+  "properties": {
+
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "intent schema 版本，与 command_schema.json 版本独立管理"
+    },
+
+    "intent_id": {
+      "type": "string",
+      "description": "本次意图的唯一ID，由后端在调用LLM前生成并注入prompt，LLM原样返回。格式：intent_{YYYYMMDD}_{sequence}"
+    },
+
+    "intent_type": {
+      "type": "string",
+      "enum": [
+        "dispense_powder",
+        "aliquot_powder",
+        "mix_powder",
+        "query_stock",
+        "query_device_status",
+        "save_formula",
+        "cancel_task",
+        "emergency_stop",
+        "unknown"
+      ],
+      "description": "意图类型。unknown 表示LLM无法识别，需反问或人工介入"
+    },
+
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "LLM生成意图的时间，ISO 8601含时区"
+    },
+
+    "is_complete": {
+      "type": "boolean",
+      "description": "LLM判断槽位信息是否完整。false时必须填写 missing_slots，后端触发反问流程",
+      "default": false
+    },
+
+    "missing_slots": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "当 is_complete=false 时，列出缺失的槽位名称。例：[\"target_mass_mg\", \"target_vessel\"]",
+      "default": []
+    },
+
+    "clarification_question": {
+      "type": "string",
+      "description": "当 is_complete=false 时，LLM生成的反问文本，由TTS播报给用户。例：'请问需要配多少毫克？'"
+    },
+
+    "reagent_hint": {
+      "type": "object",
+      "description": "LLM从用户语句中提取的试剂关键词，用于后端数据库模糊匹配。注意：LLM不保证匹配结果准确，最终以数据库查询为准",
+      "properties": {
+        "raw_text": {
+          "type": "string",
+          "description": "用户原始描述，如 '氯化钠'、'NaCl'、'食盐'、'PBS'"
+        },
+        "guessed_code": {
+          "type": ["string", "null"],
+          "description": "LLM猜测的试剂编码，可能为空或错误，规则引擎必须查库验证"
+        },
+        "guessed_name_cn": {
+          "type": ["string", "null"],
+          "description": "LLM猜测的中文名，可能为别名或不规范写法"
+        },
+        "guessed_name_formula": {
+          "type": ["string", "null"],
+          "description": "LLM猜测的化学式，可选"
+        }
+      }
+    },
+
+    "params": {
+      "type": "object",
+      "description": "意图参数，结构因 intent_type 而异，见下方 definitions",
+      "properties": {}
+    },
+
+    "raw_asr_text": {
+      "type": "string",
+      "description": "原始ASR转写文本，用于日志溯源和调试"
+    },
+
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "LLM对当前意图识别的置信度估计，0~1，仅供参考，不用于业务决策"
+    }
+  },
+
+  "definitions": {
+
+    "intent_params_dispense": {
+      "type": "object",
+      "description": "dispense_powder 的参数槽位",
+      "properties": {
+        "target_mass_mg": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "目标质量，单位 mg。用户说'50克'时LLM换算为50000。null=用户未提供"
+        },
+        "tolerance_mg": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "允许误差，单位 mg。用户未指定时为 null，规则引擎使用默认容差"
+        },
+        "target_vessel": {
+          "type": ["string", "null"],
+          "description": "目标容器编号，如 A1。null=用户未提供"
+        }
+      }
+    },
+
+    "intent_params_aliquot": {
+      "type": "object",
+      "description": "aliquot_powder 的参数槽位",
+      "properties": {
+        "portions": {
+          "type": ["integer", "null"],
+          "minimum": 2,
+          "maximum": 30,
+          "description": "分装份数，2~30。null=用户未提供"
+        },
+        "mass_per_portion_mg": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "每份质量，单位 mg。null=用户未提供"
+        },
+        "tolerance_mg": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "每份允许误差，单位 mg。null=用户未提供"
+        },
+        "target_vessels": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "容器列表。null=用户未提供"
+        }
+      }
+    },
+
+    "intent_params_mix": {
+      "type": "object",
+      "description": "mix_powder 的参数槽位",
+      "properties": {
+        "total_mass_mg": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "总目标质量，单位 mg。null=用户未提供"
+        },
+        "ratio_type": {
+          "type": ["string", "null"],
+          "enum": ["mass_fraction", "molar_fraction", null],
+          "description": "比例类型。null=用户未指定，规则引擎默认 mass_fraction"
+        },
+        "components": {
+          "type": ["array", "null"],
+          "description": "组分列表，每项包含 raw_text（用户描述）和 fraction（占比）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "raw_text":   { "type": "string", "description": "用户原始描述，如 '60%的NaCl'" },
+              "fraction":   { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "target_vessel": {
+          "type": ["string", "null"],
+          "description": "目标容器编号。null=用户未提供"
+        }
+      }
+    },
+
+    "intent_params_query_stock": {
+      "type": "object",
+      "description": "query_stock 的参数槽位",
+      "properties": {
+        "raw_text": {
+          "type": ["string", "null"],
+          "description": "用户查询的药品描述，为空则查询全部库存"
+        }
+      }
+    }
+  },
+
+  "_slot_filling_rules": {
+    "dispense_powder": {
+      "required_slots": ["reagent_hint.raw_text", "params.target_mass_mg", "params.target_vessel"],
+      "optional_slots": ["params.tolerance_mg"],
+      "default_tolerance_mg": 10,
+      "note": "tolerance_mg 用户未指定时，规则引擎按 target_mass_mg 的 2% 计算默认容差，最小 1mg"
+    },
+    "aliquot_powder": {
+      "required_slots": ["reagent_hint.raw_text", "params.portions", "params.mass_per_portion_mg"],
+      "optional_slots": ["params.tolerance_mg", "params.target_vessels"],
+      "note": "target_vessels 为空时，规则引擎自动按顺序分配空闲容器"
+    },
+    "mix_powder": {
+      "required_slots": ["params.total_mass_mg", "params.components"],
+      "optional_slots": ["params.ratio_type", "params.target_vessel"],
+      "note": "components 中所有 fraction 之和必须 =1.0（±0.001容差），规则引擎负责校验"
+    },
+    "query_stock": {
+      "required_slots": [],
+      "optional_slots": ["reagent_hint.raw_text"],
+      "note": "无槽位要求，直接执行"
+    }
+  },
+
+  "_version_history": [
+    {
+      "version": "1.0",
+      "date": "2026-04-09",
+      "changes": "初始版本。定义LLM输出的intent_json格式，与command_schema.json明确分离。包含：intent_type枚举、槽位完整性标志、缺失槽位列表、反问文本、试剂模糊提取、各意图类型参数定义、槽位填充规则"
+    }
+  ]
+}
