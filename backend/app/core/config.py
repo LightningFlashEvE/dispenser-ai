@@ -1,3 +1,6 @@
+import platform
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,10 +22,10 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:7b"
     ollama_keep_alive: int = Field(default=300, description="秒数，0=立即释放，-1=永久")
 
-    # ASR
+    # ASR（whisper.cpp）— Windows 开发阶段跳过
     whisper_cpp_model_path: str = "models/whisper/ggml-small.bin"
 
-    # TTS
+    # TTS（MeloTTS）— Windows 开发阶段跳过
     melotts_model_path: str = "models/melotts"
 
     # 数据库
@@ -39,14 +42,16 @@ class Settings(BaseSettings):
     balance_max_mass_mg: int = 220000
 
     # C++ 后级控制程序
+    # Windows 开发阶段：对接 mock-qt (HTTP)
+    # Jetson 部署阶段：替换为真实 C++ 控制程序
     control_adapter_host: str = "localhost"
     control_adapter_port: int = 9000
 
-    # 天平串口
-    balance_serial_port: str = "/dev/ttyUSB0"
+    # 天平串口（RS422-USB）— Windows 开发阶段跳过，Jetson 部署后使用
+    balance_serial_port: str = "/dev/ttyUSB0" if platform.system() == "Linux" else "COM3"
     balance_baud_rate: int = 9600
 
-    # 音频 / 相机
+    # 音频 / 相机（Windows 和 Jetson 设备索引含义不同）
     audio_device_index: int = 0
     camera_device_index: int = 0
 

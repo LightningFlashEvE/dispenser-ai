@@ -2,6 +2,64 @@
 
 ---
 
+## 0. 开发环境与部署目标
+
+### 目标部署平台规格
+
+| 项目 | 规格 |
+|------|------|
+| 主控板 | 英伟达 **Jetson Orin NX Super 开发板** |
+| 内存 | 16GB（CPU+GPU 共享） |
+| 存储 | 512GB M.2 2280 NVMe SSD |
+| 系统 | JetPack 6.x（Ubuntu 22.04 aarch64） |
+| 模式 | **Super Mode** 启用 |
+
+### 当前开发环境
+
+| 项目 | 规格 |
+|------|------|
+| OS | Windows(x86_64) |
+| 用途 | 核心业务逻辑开发（规则引擎、状态机、REST API、WebSocket、前端） |
+| Ollama | Windows 桌面版 |
+| mock-qt | FastAPI 模拟 C++ 控制程序 |
+
+### 跨平台开发须知
+
+| 差异项 | Windows 开发 | Jetson 部署 |
+|--------|-------------|-------------|
+| 串口设备路径 | `COM3` | `/dev/ttyUSB0` |
+| whisper.cpp | subprocess 调用 Windows 预编译可执行文件 | 需 git clone + cmake 编译 ARM64 版本 |
+| MeloTTS | Windows 支持差，跳过 | Linux 部署 |
+| 音频索引 | Windows WASAPI 设备索引 | Linux ALSA 设备索引，含义不同 |
+| 控制通信 | HTTP → mock-qt (localhost:9000) | TCP → 真实 C++ 控制程序 |
+| pyserial 设备 | 无硬件，跳过 | RS422-USB 工业隔离转换器 |
+| 内存限制 | 通常 32GB+ | 16GB 共享（CPU+GPU 各用），实际可用 ~12-14GB |
+
+**内存预算（16GB 环境）：**
+
+| 组件 | 内存占用 |
+|------|---------|
+| OS + UI | ~2GB |
+| Ollama + 7B 模型 | ~4-6GB |
+| whisper.cpp | ~1-2GB |
+| MeloTTS | ~500MB-1GB |
+| FastAPI + 数据库 | ~500MB |
+| **总计** | **~8-12GB** |
+
+### `config.py` 跨平台设计原则
+
+```python
+# 所有路径使用 pathlib.Path
+from pathlib import Path
+BASE_DIR = Path(__file__).parent.parent
+
+# 串口路径按平台默认
+import platform
+balance_serial_port: str = "/dev/ttyUSB0" if platform.system() == "Linux" else "COM3"
+```
+
+---
+
 ## 1. 核心硬件清单
 
 | 序号 | 设备名称 | 规格参数 | 用途 | 预算(元) |

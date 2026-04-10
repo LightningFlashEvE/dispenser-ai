@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.audit_log import AuditLog
+from app.schemas.audit_log import AuditLogRead
 
 router = APIRouter(prefix="/api/logs", tags=["操作日志"])
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 
 
-@router.get("", response_model=list[dict])
+@router.get("", response_model=list[AuditLogRead])
 async def list_logs(
     db: DBSession,
     task_id: str | None = None,
@@ -23,7 +24,7 @@ async def list_logs(
     end_time: datetime | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
-) -> list[dict]:
+) -> list[AuditLogRead]:
     """查询审计日志，仅支持读，不支持修改或删除。"""
     stmt = select(AuditLog)
     if task_id is not None:
@@ -39,14 +40,4 @@ async def list_logs(
     stmt = stmt.offset(skip).limit(limit).order_by(AuditLog.created_at.desc())
     result = await db.execute(stmt)
     logs = result.scalars().all()
-    return [
-        {
-            "id": log.id,
-            "task_id": log.task_id,
-            "operator_id": log.operator_id,
-            "event_type": log.event_type,
-            "detail": log.detail,
-            "created_at": log.created_at,
-        }
-        for log in logs
-    ]
+    return [AuditLogRead.model_validate(log) for log in logs]
