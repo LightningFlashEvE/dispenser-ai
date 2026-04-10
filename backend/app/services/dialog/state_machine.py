@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from enum import Enum
@@ -54,26 +55,32 @@ class StateMachine:
         logger.info("任务 %s 开始执行", task_id)
         return True
 
-    def complete_task(self, task_id: str) -> None:
+    def complete_task(self, task_id: str) -> bool:
         if self._current_task_id != task_id:
-            logger.warning("任务 %s 不是当前执行任务（当前=%s）", task_id, self._current_task_id)
+            logger.warning("任务 %s 不是当前执行任务（当前=%s），忽略", task_id, self._current_task_id)
+            return False
         self._device_state = DeviceState.IDLE
         self._current_task_id = None
         logger.info("任务 %s 完成", task_id)
+        return True
 
-    def fail_task(self, task_id: str, error: str) -> None:
+    def fail_task(self, task_id: str, error: str) -> bool:
         if self._current_task_id != task_id:
-            logger.warning("任务 %s 不是当前执行任务（当前=%s）", task_id, self._current_task_id)
+            logger.warning("任务 %s 不是当前执行任务（当前=%s），忽略", task_id, self._current_task_id)
+            return False
         self._device_state = DeviceState.ERROR
         self._current_task_id = None
         logger.error("任务 %s 失败: %s", task_id, error)
+        return True
 
-    def cancel_task(self, task_id: str) -> None:
+    def cancel_task(self, task_id: str) -> bool:
         if self._current_task_id != task_id:
-            logger.warning("任务 %s 不是当前执行任务（当前=%s）", task_id, self._current_task_id)
+            logger.warning("任务 %s 不是当前执行任务（当前=%s），忽略", task_id, self._current_task_id)
+            return False
         self._device_state = DeviceState.IDLE
         self._current_task_id = None
         logger.info("任务 %s 已取消", task_id)
+        return True
 
     def trigger_emergency_stop(self) -> None:
         self._device_state = DeviceState.EMERGENCY_STOP
@@ -88,6 +95,24 @@ class StateMachine:
 
 
 _state_machine: StateMachine | None = None
+_sm_lock: asyncio.Lock | None = None
+
+
+def _get_sm_lock() -> asyncio.Lock:
+    global _sm_lock
+    if _sm_lock is None:
+        _sm_lock = asyncio.Lock()
+    return _sm_lock
+
+
+async def get_state_machine_async() -> StateMachine:
+    global _state_machine
+    if _state_machine is not None:
+        return _state_machine
+    async with _get_sm_lock():
+        if _state_machine is None:
+            _state_machine = StateMachine()
+    return _state_machine
 
 
 def get_state_machine() -> StateMachine:

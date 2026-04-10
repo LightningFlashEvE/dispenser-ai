@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -13,6 +14,7 @@ class ControlClient:
         self._client = httpx.AsyncClient(
             base_url=settings.control_adapter_url,
             timeout=30.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
     async def send_command(self, command: dict[str, Any]) -> bool:
@@ -44,6 +46,7 @@ class ControlClient:
         try:
             resp = await self._client.post("/api/command", json={
                 "command_type": "emergency_stop",
+                "payload": {}
             })
             resp.raise_for_status()
             logger.info("急停指令已下发")
@@ -57,6 +60,24 @@ class ControlClient:
 
 
 _control_client: ControlClient | None = None
+_cc_lock: asyncio.Lock | None = None
+
+
+def _get_cc_lock() -> asyncio.Lock:
+    global _cc_lock
+    if _cc_lock is None:
+        _cc_lock = asyncio.Lock()
+    return _cc_lock
+
+
+async def get_control_client_async() -> ControlClient:
+    global _control_client
+    if _control_client is not None:
+        return _control_client
+    async with _get_cc_lock():
+        if _control_client is None:
+            _control_client = ControlClient()
+    return _control_client
 
 
 def get_control_client() -> ControlClient:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -109,7 +110,7 @@ class DialogSession:
         self.messages.append({"role": "assistant", "content": json_str})
 
     def is_over_limit(self) -> bool:
-        return self.round_count >= settings.dialog_max_rounds
+        return self.round_count > settings.dialog_max_rounds
 
 
 class LLMService:
@@ -215,7 +216,11 @@ class LLMService:
         )
         resp.raise_for_status()
         body = resp.json()
-        return body["choices"][0]["message"]["content"]
+        try:
+            return body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error("Ollama 响应格式异常: %s, body=%s", e, body)
+            raise ValueError(f"Ollama 响应格式异常: {e}") from e
 
     @staticmethod
     def _parse_json(text: str) -> dict | None:
@@ -234,6 +239,24 @@ class LLMService:
 
 
 _llm_instance: LLMService | None = None
+_llm_lock: asyncio.Lock | None = None
+
+
+def _get_llm_lock() -> asyncio.Lock:
+    global _llm_lock
+    if _llm_lock is None:
+        _llm_lock = asyncio.Lock()
+    return _llm_lock
+
+
+async def get_llm_async() -> LLMService:
+    global _llm_instance
+    if _llm_instance is not None:
+        return _llm_instance
+    async with _get_llm_lock():
+        if _llm_instance is None:
+            _llm_instance = LLMService()
+    return _llm_instance
 
 
 def get_llm() -> LLMService:
