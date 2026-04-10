@@ -51,10 +51,11 @@
     </div>
 
     <div class="action-bar">
-      <el-button class="cancel-btn" plain>取消</el-button>
+      <el-button class="cancel-btn" plain @click="handleCancel">取消</el-button>
       <button
         class="mic-btn"
         :class="{ active: dialogState === 'LISTENING' }"
+        @click="handleMicToggle"
       >
         <el-icon :size="32"><Microphone /></el-icon>
       </button>
@@ -70,6 +71,7 @@ import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useVoiceStore } from '@/stores/voice';
 import { useVisionStore } from '@/stores/vision';
+import { sendJson } from '@/services/websocket';
 
 const voiceStore = useVoiceStore();
 const visionStore = useVisionStore();
@@ -105,6 +107,18 @@ const balanceValue = computed(() => {
 const isBalanceStable = computed(() => {
   return balanceReading.value?.stable ?? false;
 });
+
+function handleCancel() {
+  sendJson({ type: 'cancel' });
+}
+
+function handleMicToggle() {
+  if (dialogState.value === 'LISTENING') {
+    voiceStore.setState('IDLE');
+  } else {
+    voiceStore.setState('LISTENING');
+  }
+}
 </script>
 
 <style scoped>
