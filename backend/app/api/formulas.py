@@ -30,7 +30,7 @@ def _fuzzy_score(formula: Formula, keyword: str) -> float:
         return 0.9
     if formula.formula_name.lower().startswith(kw):
         return 0.85
-    if kw in formula.aliases_list:
+    if kw in [alias.lower() for alias in formula.aliases_list]:
         return 0.95
     if any(kw in alias.lower() for alias in formula.aliases_list):
         return 0.7
