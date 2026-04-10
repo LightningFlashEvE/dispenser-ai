@@ -88,6 +88,8 @@ async def _resolve_mix_components(intent_data: dict) -> tuple[bool, str | None]:
     ratio_type = params.get("ratio_type") or "mass_fraction"
     if not isinstance(components, list) or not isinstance(total_mass_mg, int) or total_mass_mg <= 0:
         return False, "混合参数不完整"
+    if len(components) < 2:
+        return False, "混合至少需要 2 个组分"
 
     resolved_components: list[dict] = []
     if ratio_type == "molar_fraction":
@@ -185,7 +187,7 @@ async def _handle_cancel_current_task(
 
 @router.websocket("/ws/voice")
 async def voice_websocket(websocket: WebSocket) -> None:
-    client_id = f"voice_{id(websocket)}"
+    client_id = f"voice_{uuid.uuid4().hex[:12]}"
     llm = get_llm()
     state_machine = get_state_machine()
     control_client = get_control_client()
@@ -365,7 +367,7 @@ async def balance_websocket(websocket: WebSocket) -> None:
     天平实时数据通道。
     服务端持续推送天平读数（mg 整数），客户端只读。
     """
-    client_id = f"balance_{id(websocket)}"
+    client_id = f"balance_{uuid.uuid4().hex[:12]}"
     await ws_manager.connect(client_id, websocket)
     try:
         await websocket.send_json({
