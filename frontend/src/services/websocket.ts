@@ -6,12 +6,13 @@ type WsMessage =
   | { type: 'stt_final'; text: string }
   | { type: 'state_change'; state: string }
   | { type: 'question'; text: string }
-  | { type: 'tts_audio'; audio_b64: string }
   | { type: 'vision_result'; stations: unknown[] }
   | { type: 'balance_reading'; mass_mg: number; stable: boolean; timestamp: string }
+  | { type: 'balance_over_limit'; message?: string }
   | { type: 'command_sent'; command_id: string }
   | { type: 'command_result'; data: unknown }
   | { type: 'error'; code: string; message: string }
+  | { type: 'connected' }
 
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -67,8 +68,16 @@ export function connectWebSocket(url: string = `ws://${location.host}/ws/voice`)
       case 'balance_reading':
         visionStore.updateBalance({ mass_mg: msg.mass_mg, stable: msg.stable, timestamp: msg.timestamp })
         break
+      case 'balance_over_limit':
+        visionStore.setOverLimit(true, 'message' in msg ? msg.message : 'Balance reading exceeds capacity!')
+        break
       case 'command_result':
         voiceStore.setCommandResult(msg.data as Parameters<typeof voiceStore.setCommandResult>[0])
+        break
+      case 'error':
+        break
+      case 'connected':
+        console.debug('WebSocket connected signal received')
         break
     }
   }

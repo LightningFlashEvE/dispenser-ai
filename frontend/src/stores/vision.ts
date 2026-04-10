@@ -20,6 +20,8 @@ export const useVisionStore = defineStore('vision', () => {
   const stations = ref<StationStatus[]>([])
   const lastUpdatedAt = ref<string | null>(null)
   const balanceReading = ref<BalanceReading | null>(null)
+  const isOverLimit = ref(false)
+  const overLimitMessage = ref<string | undefined>(undefined)
 
   function updateStations(data: StationStatus[]) {
     stations.value = data
@@ -30,11 +32,19 @@ export const useVisionStore = defineStore('vision', () => {
     balanceReading.value = reading
   }
 
+  function setOverLimit(overLimit: boolean, message?: string) {
+    isOverLimit.value = overLimit
+    overLimitMessage.value = message
+  }
+
   return {
     stations,
     lastUpdatedAt,
     balanceReading,
+    isOverLimit,
+    overLimitMessage,
     updateStations,
     updateBalance,
+    setOverLimit,
   }
 })
