@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.task import Task, TaskStep
 from app.schemas.task import DeviceCallbackPayload, TaskRead, TaskStepRead
+from app.services.dialog.state_machine import get_state_machine
+from app.ws.manager import ws_manager
 
 router = APIRouter(prefix="/api/tasks", tags=["任务管理"])
 
@@ -50,17 +54,45 @@ async def device_callback(db: DBSession, payload: DeviceCallbackPayload) -> dict
     """
     stmt = (
         update(Task)
-        .where(Task.task_id == payload.command_id)
+        .where(Task.command_id == payload.command_id)
         .values(
-            result_json=str(payload.result) if payload.result else None,
+            result_json=json.dumps(payload.result, ensure_ascii=False) if payload.result else None,
             status=payload.status.upper(),
-            completed_at=datetime.now(timezone.utc),
+            completed_at=payload.completed_at,
         )
     )
     result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
     await db.commit()
+
+    task_row = await db.execute(select(Task).where(Task.command_id == payload.command_id))
+    matched_task = task_row.scalar_one_or_none()
+    task_id_for_sm = matched_task.task_id if matched_task else None
+
+    state_machine = get_state_machine()
+    normalized_status = payload.status.lower()
+    if task_id_for_sm and state_machine.current_task_id == task_id_for_sm:
+        if normalized_status == "completed":
+            state_machine.complete_task(task_id_for_sm)
+        elif normalized_status == "failed":
+            state_machine.fail_task(task_id_for_sm, payload.error.get("message", "任务失败") if payload.error else "任务失败")
+        elif normalized_status == "cancelled":
+            state_machine.cancel_task(task_id_for_sm)
+
+    await ws_manager.broadcast(
+        {
+            "type": "command_result",
+            "data": {
+                "command_id": payload.command_id,
+                "status": normalized_status,
+                "result": payload.result,
+                "error": payload.error,
+                "completed_at": payload.completed_at.isoformat(),
+            },
+        }
+    )
+    await ws_manager.broadcast({"type": "state_change", "state": "FEEDBACK"})
     return {"received": True}
 
 

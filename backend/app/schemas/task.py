@@ -40,6 +40,6 @@ class TaskRead(BaseModel):
 class DeviceCallbackPayload(BaseModel):
     command_id: str
     status: str
-    completed_at: str
+    completed_at: datetime
     result: Any | None = None
     error: dict[str, str] | None = None
