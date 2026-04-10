@@ -102,7 +102,7 @@ def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
             fractions = [
                 c.get("fraction") for c in components if c.get("fraction") is not None
             ]
-            if fractions and abs(sum(fractions) - 1.0) > 0.01:
+            if fractions and abs(sum(fractions) - 1.0) > 0.02:
                 errors.append(f"组分 fraction 之和 {sum(fractions):.4f} ≠ 1.0")
 
     target_mass = params.get("target_mass_mg") or params.get("mass_per_portion_mg") or params.get("total_mass_mg")
@@ -118,7 +118,9 @@ def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
 def load_intent_schema() -> dict:
     path = Path(settings.intent_schema_path).resolve()
     if not path.exists():
-        logger.warning("intent_schema.json 不存在: %s", path)
-        return {}
+        raise FileNotFoundError(f"intent_schema.json 不存在: {path}")
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, dict) or "properties" not in data:
+        raise ValueError(f"intent_schema.json 格式无效: {path}")
+    return data

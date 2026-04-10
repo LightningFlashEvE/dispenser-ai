@@ -153,14 +153,16 @@ def _build_emergency_stop_payload(intent: dict, drug: dict | None) -> dict:
 def _calc_default_tolerance(target_mass_mg: int) -> int:
     if not target_mass_mg or target_mass_mg <= 0:
         return settings.default_tolerance_mg
-    pct_value = int(target_mass_mg * settings.default_tolerance_pct / 100)
+    pct_value = round(target_mass_mg * settings.default_tolerance_pct / 100)
     return max(settings.default_tolerance_mg, pct_value)
 
 
 def load_command_schema() -> dict:
     path = Path(settings.command_schema_path).resolve()
     if not path.exists():
-        logger.warning("command_schema.json 不存在: %s", path)
-        return {}
+        raise FileNotFoundError(f"command_schema.json 不存在: {path}")
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"command_schema.json 格式无效: {path}")
+    return data

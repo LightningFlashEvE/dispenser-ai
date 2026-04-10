@@ -8,7 +8,8 @@ from typing import Any
 
 
 def mass_to_moles(mass_mg: int, molar_weight_g_mol: float) -> float:
-    """质量(mg) → 摩尔数."""
+    if molar_weight_g_mol <= 0:
+        raise ValueError(f"摩尔质量必须为正数，得到 {molar_weight_g_mol}")
     return (mass_mg / 1000.0) / molar_weight_g_mol
 
 
@@ -38,11 +39,13 @@ def calc_mix_components(
             c.get("fraction", 0) * molar_weights.get(c.get("raw_text", ""), 1.0)
             for c in components
         )
+        if total_molar_mass <= 0:
+            raise ValueError("摩尔分数换算失败：加权摩尔质量总和为 0（检查 fraction 和 molar_weight）")
         mass_fractions = []
         for c in components:
             raw = c.get("raw_text", "")
             mw = molar_weights.get(raw, 1.0)
-            mass_fractions.append((c["fraction"] * mw) / total_molar_mass if total_molar_mass else 0)
+            mass_fractions.append((c["fraction"] * mw) / total_molar_mass)
     else:
         mass_fractions = [c.get("fraction", 0) for c in components]
 
