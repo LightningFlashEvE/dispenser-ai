@@ -8,7 +8,7 @@ type WsMessage =
   | { type: 'question'; text: string }
   | { type: 'vision_result'; stations: unknown[] }
   | { type: 'balance_reading'; mass_mg: number; stable: boolean; timestamp: string }
-  | { type: 'balance_over_limit'; message?: string }
+  | { type: 'balance_over_limit'; mass_mg: number; timestamp: string }
   | { type: 'command_sent'; command_id: string }
   | { type: 'command_result'; data: unknown }
   | { type: 'error'; code: string; message: string }
@@ -69,7 +69,7 @@ export function connectWebSocket(url: string = `ws://${location.host}/ws/voice`)
         visionStore.updateBalance({ mass_mg: msg.mass_mg, stable: msg.stable, timestamp: msg.timestamp })
         break
       case 'balance_over_limit':
-        visionStore.setOverLimit(true, 'message' in msg ? msg.message : 'Balance reading exceeds capacity!')
+        visionStore.setOverLimit(true, `天平读数 ${msg.mass_mg} mg 超出量程`)
         break
       case 'command_result':
         voiceStore.setCommandResult(msg.data as Parameters<typeof voiceStore.setCommandResult>[0])

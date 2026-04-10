@@ -11,7 +11,7 @@ export interface Drug {
   reagent_name_cn: string
   reagent_name_en?: string
   reagent_name_formula?: string
-  reagent_aliases?: string[]
+  aliases_list: string[]
   cas_number?: string
   purity_grade?: string
   molar_weight_g_mol?: number
@@ -19,23 +19,50 @@ export interface Drug {
   station_id?: string
   stock_mg: number
   notes?: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface Formula {
   formula_id: string
   formula_name: string
-  aliases?: string[]
-  steps: unknown[]
+  aliases_list: string[]
+  steps: FormulaStep[]
   created_at: string
+  updated_at: string
+}
+
+export interface FormulaStep {
+  step_index: number
+  step_name: string
+  command_type: string
+  reagent_code?: string
+  target_mass_mg?: number
+  tolerance_mg?: number
+  target_vessel?: string
 }
 
 export interface TaskRecord {
   task_id: string
   command_type: string
+  operator_id: string
   status: string
+  error_code?: string
+  error_message?: string
   created_at: string
+  confirmed_at?: string
+  started_at?: string
   completed_at?: string
-  result?: unknown
+}
+
+export interface AuditLog {
+  id: number
+  task_id?: string
+  operator_id: string
+  event_type: string
+  detail?: string
+  created_at: string
 }
 
 export const drugApi = {
@@ -59,6 +86,10 @@ export const formulaApi = {
 export const taskApi = {
   list: (limit = 50) => http.get<TaskRecord[]>('/tasks', { params: { limit } }),
   get: (id: string) => http.get<TaskRecord>(`/tasks/${id}`),
+}
+
+export const logsApi = {
+  list: (limit = 100) => http.get<AuditLog[]>('/logs', { params: { limit } }),
 }
 
 export const deviceApi = {
