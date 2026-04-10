@@ -31,11 +31,12 @@
         "query_stock",
         "query_device_status",
         "save_formula",
+        "restock",
         "cancel_task",
         "emergency_stop",
         "unknown"
       ],
-      "description": "意图类型。unknown 表示LLM无法识别，需反问或人工介入"
+      "description": "意图类型。restock=试剂入库。unknown 表示LLM无法识别，需反问或人工介入"
     },
 
     "timestamp": {

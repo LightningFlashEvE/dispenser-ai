@@ -3,7 +3,7 @@
 
   "port": 9000,
 
-  "ai_callback_url": "http://localhost:8000/api/device/callback",
+  "ai_callback_url": "http://localhost:8000/api/tasks/callback",
 
   "execution_delay_ms": 2000,
 

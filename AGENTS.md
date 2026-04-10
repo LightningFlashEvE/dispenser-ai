@@ -172,7 +172,7 @@ LOG_LEVEL=INFO
 ### 后端 ↔ C++ 后级控制程序（TCP）
 - `POST http://{CONTROL_ADAPTER_HOST}:{CONTROL_ADAPTER_PORT}/api/command`（下发 command JSON）
 - `GET  http://{CONTROL_ADAPTER_HOST}:{CONTROL_ADAPTER_PORT}/api/status`（查询设备状态）
-- `POST /api/device/callback`（C++ 回调 AI 层的执行结果）
+- `POST /api/tasks/callback`（C++ 回调 AI 层的执行结果）
 
 ### 后端 ↔ 天平（RS422-USB 串口）
 - 串口设备：`BALANCE_SERIAL_PORT`（默认 `/dev/ttyUSB0`）

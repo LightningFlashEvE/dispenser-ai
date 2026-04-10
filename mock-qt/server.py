@@ -7,7 +7,7 @@ mock-qt/server.py
   1. 接收 AI 层下发的 command JSON（POST /api/command）
   2. 立即返回 accepted/rejected
   3. 在后台异步等待 execution_delay_ms 后，按 failure_rate 概率决定成功/失败
-  4. 主动 POST 回调 AI 层的 /api/device/callback
+   4. 主动 POST 回调 AI 层的 /api/tasks/callback
   5. 支持 emergency_stop（立即取消所有进行中任务）
   6. 支持 cancel（取消指定任务）
   7. GET /api/status 返回当前设备状态
@@ -50,7 +50,7 @@ def now_iso() -> str:
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG: dict[str, Any] = {
     "port": 9000,
-    "ai_callback_url": "http://localhost:8000/api/device/callback",
+    "ai_callback_url": "http://localhost:8000/api/tasks/callback",
     "execution_delay_ms": 2000,
     "failure_rate": 0.05,
     "simulate_actual_mass": True,

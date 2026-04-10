@@ -10,7 +10,7 @@
 1. 接收 AI 层下发的 JSON 指令
 2. 校验指令格式是否符合 `command_schema.json`
 3. 模拟执行过程（可配置延迟和成功/失败概率）
-4. 主动回调 AI 层的 `/api/device/callback` 接口
+4. 主动回调 AI 层的 `/api/tasks/callback` 接口
 
 ---
 
@@ -75,7 +75,7 @@ mock-qt/
 {
   "execution_delay_ms": 2000,
   "failure_rate": 0.05,
-  "ai_callback_url": "http://localhost:8000/api/device/callback",
+  "ai_callback_url": "http://localhost:8000/api/tasks/callback",
   "log_all_commands": true,
   "simulate_actual_mass": true,
   "actual_mass_deviation_pct": 0.3
