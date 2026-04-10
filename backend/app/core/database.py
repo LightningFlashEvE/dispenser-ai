@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -36,3 +37,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        task_columns = await conn.execute(text("PRAGMA table_info(tasks)"))
+        column_names = {row[1] for row in task_columns.fetchall()}
+        if "command_id" not in column_names:
+            await conn.execute(text("ALTER TABLE tasks ADD COLUMN command_id VARCHAR(36)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_command_id ON tasks (command_id)"))
