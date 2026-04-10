@@ -38,12 +38,6 @@ def _extract_reagent_fields(drug: dict | None) -> dict:
     return {k: v for k, v in drug.items() if k in REAGENT_FIELDS and v is not None}
 
 
-def _expand_mix_component(comp: dict) -> dict:
-    return {
-        "raw_text": comp.get("raw_text"),
-        "fraction": comp.get("fraction"),
-    }
-
 
 async def build_command(
     intent_data: dict,
@@ -116,12 +110,10 @@ def _build_aliquot_payload(intent: dict, drug: dict | None) -> dict:
 
 def _build_mix_payload(intent: dict, drug: dict | None) -> dict:
     params = intent.get("params", {})
-    components = params.get("components", [])
-    expanded_components = [_expand_mix_component(c) for c in components]
     return {
         "total_mass_mg": params.get("total_mass_mg"),
         "ratio_type": params.get("ratio_type") or "mass_fraction",
-        "components": expanded_components,
+        "components": params.get("components", []),
         "target_vessel": params.get("target_vessel"),
         "execution_mode": "sequential",
     }

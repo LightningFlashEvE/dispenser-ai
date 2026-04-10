@@ -8,33 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.drug import Drug
 from app.schemas.drug import DrugCreate, DrugRead, DrugSearchResult, DrugUpdate
+from app.services.inventory.drug_lookup import fuzzy_score
 
 router = APIRouter(prefix="/api/drugs", tags=["药品管理"])
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
-
-
-def _fuzzy_score(drug: Drug, keyword: str) -> float:
-    kw = keyword.lower().strip()
-    if drug.reagent_code.lower() == kw:
-        return 1.0
-    if drug.reagent_name_cn.lower() == kw:
-        return 0.95
-    if drug.reagent_code.lower().startswith(kw):
-        return 0.9
-    if drug.reagent_name_cn.lower().startswith(kw):
-        return 0.85
-    if kw in drug.aliases_list:
-        return 0.95
-    if any(kw in alias.lower() for alias in drug.aliases_list):
-        return 0.75
-    if drug.reagent_name_formula and kw in drug.reagent_name_formula.lower():
-        return 0.7
-    if drug.reagent_name_en and kw in drug.reagent_name_en.lower():
-        return 0.6
-    if kw in drug.reagent_name_cn.lower():
-        return 0.5
-    return 0.0
 
 
 @router.get("", response_model=list[DrugRead])
@@ -66,7 +44,7 @@ async def search_drugs(
     all_drugs: list[Drug] = list(result.scalars().all())
 
     scored: list[tuple[Drug, float]] = [
-        (d, _fuzzy_score(d, q)) for d in all_drugs
+        (d, fuzzy_score(d, q)) for d in all_drugs
     ]
     scored = [(d, s) for d, s in scored if s > 0]
     scored.sort(key=lambda x: x[1], reverse=True)
