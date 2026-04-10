@@ -16,6 +16,7 @@ INTENT_TO_COMMAND = {
     "query_stock": "query_stock",
     "query_device_status": "device_status",
     "save_formula": "formula",
+    "restock": "restock",
     "cancel_task": "cancel",
     "emergency_stop": "emergency_stop",
 }
@@ -23,6 +24,25 @@ INTENT_TO_COMMAND = {
 COMMANDS_REQUIRING_CONFIRMATION = {
     "dispense", "aliquot", "mix", "formula", "restock",
 }
+
+REAGENT_FIELDS = [
+    "reagent_code", "reagent_name_cn", "reagent_name_en",
+    "reagent_name_formula", "purity_grade", "station_id",
+    "molar_weight_g_mol",
+]
+
+
+def _extract_reagent_fields(drug: dict | None) -> dict:
+    if not drug:
+        return {}
+    return {k: v for k, v in drug.items() if k in REAGENT_FIELDS and v is not None}
+
+
+def _expand_mix_component(comp: dict) -> dict:
+    return {
+        "raw_text": comp.get("raw_text"),
+        "fraction": comp.get("fraction"),
+    }
 
 
 async def build_command(
@@ -42,6 +62,7 @@ async def build_command(
         "query_stock": _build_query_stock_payload,
         "device_status": _build_device_status_payload,
         "formula": _build_formula_payload,
+        "restock": _build_restock_payload,
         "cancel": _build_cancel_payload,
         "emergency_stop": _build_emergency_stop_payload,
     }
@@ -72,32 +93,37 @@ async def build_command(
 
 def _build_dispense_payload(intent: dict, drug: dict | None) -> dict:
     params = intent.get("params", {})
+    reagent = _extract_reagent_fields(drug)
     return {
         "target_mass_mg": params.get("target_mass_mg"),
         "tolerance_mg": params.get("tolerance_mg") or _calc_default_tolerance(params.get("target_mass_mg", 0)),
         "target_vessel": params.get("target_vessel"),
-        "reagent": drug,
+        **reagent,
     }
 
 
 def _build_aliquot_payload(intent: dict, drug: dict | None) -> dict:
     params = intent.get("params", {})
+    reagent = _extract_reagent_fields(drug)
     return {
         "portions": params.get("portions"),
         "mass_per_portion_mg": params.get("mass_per_portion_mg"),
         "tolerance_mg": params.get("tolerance_mg") or _calc_default_tolerance(params.get("mass_per_portion_mg", 0)),
         "target_vessels": params.get("target_vessels"),
-        "reagent": drug,
+        **reagent,
     }
 
 
 def _build_mix_payload(intent: dict, drug: dict | None) -> dict:
     params = intent.get("params", {})
+    components = params.get("components", [])
+    expanded_components = [_expand_mix_component(c) for c in components]
     return {
         "total_mass_mg": params.get("total_mass_mg"),
         "ratio_type": params.get("ratio_type") or "mass_fraction",
-        "components": params.get("components", []),
+        "components": expanded_components,
         "target_vessel": params.get("target_vessel"),
+        "execution_mode": "sequential",
     }
 
 
@@ -112,6 +138,16 @@ def _build_device_status_payload(intent: dict, drug: dict | None) -> dict:
 
 def _build_formula_payload(intent: dict, drug: dict | None) -> dict:
     return {}
+
+
+def _build_restock_payload(intent: dict, drug: dict | None) -> dict:
+    params = intent.get("params", {})
+    reagent = _extract_reagent_fields(drug)
+    return {
+        "added_mass_mg": params.get("added_mass_mg"),
+        "station_id": params.get("station_id") or reagent.get("station_id"),
+        **reagent,
+    }
 
 
 def _build_cancel_payload(intent: dict, drug: dict | None) -> dict:

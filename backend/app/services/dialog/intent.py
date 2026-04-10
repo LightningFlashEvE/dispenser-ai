@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 
@@ -13,6 +14,7 @@ INTENT_TYPES = {
     "query_stock",
     "query_device_status",
     "save_formula",
+    "restock",
     "cancel_task",
     "emergency_stop",
     "unknown",
@@ -35,10 +37,18 @@ SLOT_RULES = {
         "required_slots": [],
         "optional_slots": ["reagent_hint.raw_text"],
     },
+    "save_formula": {
+        "required_slots": [],
+        "optional_slots": [],
+    },
+    "restock": {
+        "required_slots": ["reagent_hint.raw_text", "params.added_mass_mg"],
+        "optional_slots": ["params.station_id"],
+    },
 }
 
 
-def _get_nested(data: dict, path: str) -> any:
+def _get_nested(data: dict, path: str) -> Any:
     parts = path.split(".")
     current = data
     for part in parts:
@@ -63,7 +73,7 @@ def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
         errors.append(f"intent_type '{intent_type}' 不在允许的枚举中")
         return False, errors, None
 
-    if intent_type in ("query_stock", "query_device_status", "cancel_task", "emergency_stop", "unknown"):
+    if intent_type in ("query_stock", "query_device_status", "save_formula", "cancel_task", "emergency_stop", "unknown"):
         return True, [], None
 
     rules = SLOT_RULES.get(intent_type)
