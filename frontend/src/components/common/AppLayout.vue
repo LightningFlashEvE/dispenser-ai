@@ -4,11 +4,14 @@
     <main class="main-content">
       <slot></slot>
     </main>
+    <!-- 全局悬浮 AI 球，所有页面均可见 -->
+    <FloatingAiOrb />
   </div>
 </template>
 
 <script setup lang="ts">
-import NavSidebar from './NavSidebar.vue';
+import NavSidebar from './NavSidebar.vue'
+import FloatingAiOrb from './FloatingAiOrb.vue'
 </script>
 
 <style scoped>

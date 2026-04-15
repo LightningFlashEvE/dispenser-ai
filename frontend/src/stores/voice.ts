@@ -31,6 +31,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const latestQuestion = ref<string | null>(null)
   const latestCommandResult = ref<CommandResult | null>(null)
   const isConnected = ref(false)
+  const isTtsSpeaking = ref(false)
 
   function setState(s: DialogState) {
     dialogState.value = s
@@ -56,11 +57,16 @@ export const useVoiceStore = defineStore('voice', () => {
     isConnected.value = v
   }
 
+  function setTtsSpeaking(v: boolean) {
+    isTtsSpeaking.value = v
+  }
+
   function reset() {
     dialogState.value = 'IDLE'
     realtimeCaption.value = ''
     latestQuestion.value = null
     latestCommandResult.value = null
+    isTtsSpeaking.value = false
   }
 
   return {
@@ -70,12 +76,14 @@ export const useVoiceStore = defineStore('voice', () => {
     latestQuestion,
     latestCommandResult,
     isConnected,
+    isTtsSpeaking,
     setState,
     setCaption,
     addMessage,
     setQuestion,
     setCommandResult,
     setConnected,
+    setTtsSpeaking,
     reset,
   }
 })

@@ -4,12 +4,17 @@ import type { RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/voice',
+    redirect: '/status',
   },
   {
-    path: '/voice',
-    name: 'Voice',
+    path: '/status',
+    name: 'Status',
     component: () => import('@/views/VoiceView.vue'),
+  },
+  {
+    path: '/manual',
+    name: 'Manual',
+    component: () => import('@/views/ManualView.vue'),
   },
   {
     path: '/inventory',
@@ -30,11 +35,6 @@ const routes: RouteRecordRaw[] = [
     path: '/vision',
     name: 'Vision',
     component: () => import('@/views/VisionView.vue'),
-  },
-  {
-    path: '/device',
-    name: 'Device',
-    component: () => import('@/views/DeviceView.vue'),
   },
   {
     path: '/settings',

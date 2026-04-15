@@ -17,14 +17,14 @@
 
 <script setup lang="ts">
 const navItems = [
-  { name: '语音交互', path: '/' },
+  { name: '系统状态', path: '/status' },
+  { name: '手动控制', path: '/manual' },
   { name: '库存管理', path: '/inventory' },
-  { name: '配方库', path: '/formulas' },
+  { name: '配方库',   path: '/formulas' },
   { name: '操作日志', path: '/logs' },
   { name: '工位识别', path: '/vision' },
-  { name: '设备状态', path: '/device' },
-  { name: '系统设置', path: '/settings' }
-];
+  { name: '系统设置', path: '/settings' },
+]
 </script>
 
 <style scoped>

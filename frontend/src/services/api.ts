@@ -96,4 +96,17 @@ export const deviceApi = {
   status: () => http.get('/device/status'),
 }
 
+export const manualApi = {
+  /** 手动下发 command JSON，后端走规则校验 + 状态机 + 控制下发 */
+  sendCommand: (payload: Record<string, unknown>) =>
+    http.post<{ task_id: string; command_id: string; status: string }>(
+      '/manual/command',
+      payload,
+    ),
+}
+
+export const stationsApi = {
+  list: () => http.get('/stations'),
+}
+
 export default http

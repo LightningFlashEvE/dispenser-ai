@@ -10,6 +10,7 @@ from app.api.tasks import router as tasks_router
 from app.api.stations import router as stations_router
 from app.api.device import router as device_router
 from app.api.logs import router as logs_router
+from app.api.manual import router as manual_router
 from app.ws.channels import router as ws_router
 from app.core.config import settings
 from app.core.database import init_db
@@ -59,6 +60,7 @@ app.include_router(tasks_router)
 app.include_router(stations_router)
 app.include_router(device_router)
 app.include_router(logs_router)
+app.include_router(manual_router)
 app.include_router(ws_router)
 
 

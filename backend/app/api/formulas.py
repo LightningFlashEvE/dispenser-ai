@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.models.formula import Formula, FormulaStep
@@ -18,6 +19,10 @@ from app.schemas.formula import (
 router = APIRouter(prefix="/api/formulas", tags=["配方管理"])
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _formula_with_steps_stmt() -> "Select":
+    return select(Formula).options(selectinload(Formula.steps))
 
 
 def _fuzzy_score(formula: Formula, keyword: str) -> float:
@@ -45,7 +50,7 @@ async def list_formulas(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[Formula]:
-    stmt = select(Formula).offset(skip).limit(limit).order_by(Formula.formula_name)
+    stmt = _formula_with_steps_stmt().offset(skip).limit(limit).order_by(Formula.formula_name)
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -80,7 +85,7 @@ async def search_formulas(
 
 @router.get("/{formula_id}", response_model=FormulaRead)
 async def get_formula(db: DBSession, formula_id: str) -> Formula:
-    stmt = select(Formula).where(Formula.formula_id == formula_id)
+    stmt = _formula_with_steps_stmt().where(Formula.formula_id == formula_id)
     result = await db.execute(stmt)
     formula = result.scalar_one_or_none()
     if formula is None:
@@ -121,15 +126,17 @@ async def create_formula(db: DBSession, formula_in: FormulaCreate) -> Formula:
 
     db.add(formula)
     await db.commit()
-    await db.refresh(formula)
-    return formula
+    created_stmt = _formula_with_steps_stmt().where(Formula.formula_id == formula.formula_id)
+    created_result = await db.execute(created_stmt)
+    created_formula = created_result.scalar_one()
+    return created_formula
 
 
 @router.put("/{formula_id}", response_model=FormulaRead)
 async def update_formula(
     db: DBSession, formula_id: str, formula_in: FormulaUpdate
 ) -> Formula:
-    stmt = select(Formula).where(Formula.formula_id == formula_id)
+    stmt = _formula_with_steps_stmt().where(Formula.formula_id == formula_id)
     result = await db.execute(stmt)
     formula = result.scalar_one_or_none()
     if formula is None:
@@ -160,8 +167,10 @@ async def update_formula(
 
     formula.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(formula)
-    return formula
+    updated_stmt = _formula_with_steps_stmt().where(Formula.formula_id == formula_id)
+    updated_result = await db.execute(updated_stmt)
+    updated_formula = updated_result.scalar_one()
+    return updated_formula
 
 
 @router.delete("/{formula_id}", status_code=status.HTTP_204_NO_CONTENT)

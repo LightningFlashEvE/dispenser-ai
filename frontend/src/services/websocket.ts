@@ -1,11 +1,14 @@
 import { useVoiceStore, type DialogState } from '@/stores/voice'
 import { useVisionStore } from '@/stores/vision'
+import { playTtsAudio, stopTtsPlayback } from './audio'
 
 type WsMessage =
   | { type: 'stt_partial'; text: string }
   | { type: 'stt_final'; text: string }
   | { type: 'state_change'; state: string }
   | { type: 'question'; text: string }
+  | { type: 'tts_audio'; data: string; sample_rate?: number }
+  | { type: 'tts_end' }
   | { type: 'vision_result'; stations: unknown[] }
   | { type: 'balance_reading'; mass_mg: number; stable: boolean; timestamp: string }
   | { type: 'balance_over_limit'; mass_mg: number; timestamp: string }
@@ -55,8 +58,22 @@ export function connectWebSocket(url: string = `ws://${location.host}/ws/voice`)
         voiceStore.setCaption(msg.text)
         voiceStore.addMessage({ role: 'user', text: msg.text, timestamp: new Date().toISOString() })
         break
-      case 'state_change':
-        voiceStore.setState(msg.state as DialogState)
+      case 'state_change': {
+        const nextState = msg.state as DialogState
+        if (nextState === 'IDLE' || nextState === 'LISTENING') {
+          stopTtsPlayback()
+          voiceStore.setTtsSpeaking(false)
+        }
+        voiceStore.setState(nextState)
+        break
+      }
+      case 'tts_audio':
+        voiceStore.setTtsSpeaking(true)
+        playTtsAudio(msg.data, msg.sample_rate ?? 22050)
+        break
+      case 'tts_end':
+        voiceStore.setTtsSpeaking(false)
+        stopTtsPlayback()
         break
       case 'question':
         voiceStore.setQuestion(msg.text)

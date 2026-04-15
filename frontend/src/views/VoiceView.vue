@@ -1,358 +1,441 @@
 <template>
-  <div class="voice-view">
-    <div class="status-bar" :class="dialogState.toLowerCase()">
-      <div class="status-indicator"></div>
-      <span class="status-text">{{ statusText }}</span>
+  <div class="status-view">
+    <div class="page-header">
+      <h2>系统状态</h2>
+      <div class="header-hint">点击右下角 AI 球可发起对话</div>
     </div>
 
-    <div class="main-grid">
-      <div class="interaction-col">
-        <div class="interaction-card">
-          <div v-if="latestQuestion" class="ai-question">
-            {{ latestQuestion }}
-          </div>
-          
-          <div class="caption-box">
-            <div v-if="realtimeCaption" class="caption-text realtime">
-              {{ realtimeCaption }}
-            </div>
-            <div v-else class="caption-text placeholder">
-              等待语音输入...
-            </div>
-          </div>
+    <!-- 第一行：天平 / 网络 / 设备状态 -->
+    <div class="row-cards">
+      <!-- 天平读数 -->
+      <el-card class="stat-card">
+        <div class="card-label">天平读数</div>
+        <div class="balance-val" :class="{ stable: isBalanceStable }">
+          {{ balanceValue }}<span class="unit">mg</span>
         </div>
+        <div class="card-sub">{{ isBalanceStable ? '已稳定' : '未稳定' }}</div>
+      </el-card>
 
-        <div class="balance-card">
-          <div class="balance-title">天平读数</div>
-          <div class="balance-reading" :class="{ stable: isBalanceStable }">
-            <span class="value">{{ balanceValue }}</span>
-            <span class="unit">mg</span>
-          </div>
+      <!-- WebSocket 连接 -->
+      <el-card class="stat-card">
+        <div class="card-label">AI 后端连接</div>
+        <div class="status-val" :class="isConnected ? 'ok' : 'err'">
+          {{ isConnected ? '已连接' : '未连接' }}
         </div>
-      </div>
+        <div class="card-sub">WebSocket /ws/voice</div>
+      </el-card>
 
-      <div class="history-col">
-        <h3 class="history-title">对话历史</h3>
-        <div class="history-list">
-          <div 
-            v-for="(msg, index) in transcript" 
-            :key="index"
-            class="message"
-            :class="msg.role"
+      <!-- 设备状态 -->
+      <el-card class="stat-card">
+        <div class="card-label">设备状态</div>
+        <div class="status-val" :class="deviceStatusClass">
+          {{ deviceStatusText }}
+        </div>
+        <div class="card-sub">{{ lastFetchAt ? '更新: ' + formatTime(lastFetchAt) : '等待中...' }}</div>
+      </el-card>
+
+      <!-- AI 对话状态 -->
+      <el-card class="stat-card">
+        <div class="card-label">AI 对话状态</div>
+        <div class="dialog-badge" :class="dialogState.toLowerCase()">
+          <span class="badge-dot"></span>{{ dialogStateText }}
+        </div>
+        <div class="card-sub">状态机: {{ deviceStore.status?.state_machine_state ?? '—' }}</div>
+      </el-card>
+    </div>
+
+    <!-- 第二行：视觉工位摘要 / 当前任务 -->
+    <div class="row-cards row-mid">
+      <!-- 视觉工位摘要 -->
+      <el-card class="mid-card">
+        <div class="card-label">工位状态摘要</div>
+        <div v-if="stations.length === 0" class="empty-tip">等待视觉系统连接</div>
+        <div v-else class="station-grid">
+          <div
+            v-for="s in stations"
+            :key="s.station_id"
+            class="station-chip"
+            :class="{ occupied: s.has_bottle }"
           >
-            <div class="msg-time">{{ msg.timestamp }}</div>
-            <div class="msg-text">{{ msg.text }}</div>
-          </div>
-          <div v-if="transcript.length === 0" class="empty-history">
-            暂无对话历史
+            <span class="s-id">{{ s.station_id }}</span>
+            <span class="s-state">{{ s.has_bottle ? (s.reagent_name_cn ?? '有瓶') : '空' }}</span>
           </div>
         </div>
-      </div>
+        <div class="card-sub">{{ visionLastUpdated }}</div>
+      </el-card>
+
+      <!-- 最近任务结果 -->
+      <el-card class="mid-card">
+        <div class="card-label">最近任务结果</div>
+        <div v-if="!latestCommandResult" class="empty-tip">暂无任务记录</div>
+        <template v-else>
+          <div class="task-status" :class="latestCommandResult.status">
+            {{ taskStatusText }}
+          </div>
+          <div class="task-id">任务 {{ latestCommandResult.command_id?.slice(0, 12) }}…</div>
+          <div v-if="latestCommandResult.error" class="task-err">
+            {{ latestCommandResult.error.message }}
+          </div>
+        </template>
+      </el-card>
     </div>
 
-    <div class="action-bar">
-      <el-button class="cancel-btn" plain @click="handleCancel">取消</el-button>
-      <button
-        class="mic-btn"
-        :class="{ active: dialogState === 'LISTENING' }"
-        @click="handleMicToggle"
-      >
-        <el-icon :size="32"><Microphone /></el-icon>
-      </button>
-      <div class="connection-status" :class="{ connected: isConnected }">
-        {{ isConnected ? '系统已连接' : '系统未连接' }}
+    <!-- 第三行：对话历史 -->
+    <el-card class="history-card">
+      <div class="card-label-inline">
+        对话历史
+        <el-button link size="small" @click="clearHistory">清空</el-button>
       </div>
-    </div>
+      <!-- AI 反问高亮 -->
+      <transition name="fade">
+        <div v-if="latestQuestion" class="ai-question">
+          <el-icon><QuestionFilled /></el-icon>
+          {{ latestQuestion }}
+        </div>
+      </transition>
+      <!-- 实时转写 -->
+      <div v-if="realtimeCaption" class="caption-bar">
+        <span class="caption-live">● 正在识别：</span>{{ realtimeCaption }}
+      </div>
+      <!-- 消息列表 -->
+      <div ref="historyRef" class="history-list">
+        <div v-if="transcript.length === 0" class="empty-tip center">暂无对话历史</div>
+        <div v-for="(msg, i) in transcript" :key="i" class="history-msg" :class="msg.role">
+          <div class="msg-time">{{ formatTime(msg.timestamp) }}</div>
+          <div class="msg-bubble">{{ msg.text }}</div>
+        </div>
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { storeToRefs } from 'pinia';
-import { useVoiceStore } from '@/stores/voice';
-import { useVisionStore } from '@/stores/vision';
-import { sendJson } from '@/services/websocket';
+import { computed, ref, watch, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useVoiceStore } from '@/stores/voice'
+import { useVisionStore } from '@/stores/vision'
+import { useDeviceStore } from '@/stores/device'
 
-const voiceStore = useVoiceStore();
-const visionStore = useVisionStore();
+const voiceStore  = useVoiceStore()
+const visionStore = useVisionStore()
+const deviceStore  = useDeviceStore()
 
-const { 
-  dialogState, 
-  realtimeCaption, 
-  transcript, 
-  latestQuestion, 
-  isConnected 
-} = storeToRefs(voiceStore);
+const {
+  dialogState,
+  realtimeCaption,
+  transcript,
+  latestQuestion,
+  latestCommandResult,
+  isConnected,
+} = storeToRefs(voiceStore)
 
-const { balanceReading } = storeToRefs(visionStore);
+const { stations, lastUpdatedAt, balanceReading } = storeToRefs(visionStore)
+const { lastFetchAt } = storeToRefs(deviceStore)
 
-const statusText = computed(() => {
+// ─── 天平 ───────────────────────────────────────────────────────
+const balanceValue  = computed(() => balanceReading.value?.mass_mg.toFixed(1) ?? '0.0')
+const isBalanceStable = computed(() => balanceReading.value?.stable ?? false)
+
+// ─── 对话状态文字 ────────────────────────────────────────────────
+const dialogStateText = computed(() => {
   const map: Record<string, string> = {
-    'IDLE': '空闲中',
-    'LISTENING': '正在聆听...',
-    'PROCESSING': '处理中...',
-    'ASKING': '需补充信息',
-    'EXECUTING': '正在执行...',
-    'FEEDBACK': '执行完成',
-    'ERROR': '发生错误'
-  };
-  return map[dialogState.value] || '未知状态';
-});
+    IDLE: '空闲', LISTENING: '聆听中', PROCESSING: '处理中',
+    ASKING: '反问中', EXECUTING: '执行中', FEEDBACK: '执行完成', ERROR: '发生错误',
+  }
+  return map[dialogState.value] ?? '未知'
+})
 
-const balanceValue = computed(() => {
-  if (!balanceReading.value) return '0.0';
-  return balanceReading.value.mass_mg.toFixed(1);
-});
+// ─── 设备状态 ────────────────────────────────────────────────────
+const deviceStatusText = computed(() => {
+  const s = deviceStore.status?.device_status
+  if (!s || s === 'unknown') return '未知'
+  const map: Record<string, string> = { ready: '就绪', busy: '忙碌', error: '错误', offline: '离线' }
+  return map[s] ?? s
+})
 
-const isBalanceStable = computed(() => {
-  return balanceReading.value?.stable ?? false;
-});
+const deviceStatusClass = computed(() => {
+  const s = deviceStore.status?.device_status
+  if (s === 'ready')  return 'ok'
+  if (s === 'error')  return 'err'
+  if (s === 'busy')   return 'warn'
+  return 'neutral'
+})
 
-function handleCancel() {
-  sendJson({ type: 'cancel' });
+// ─── 任务结果 ────────────────────────────────────────────────────
+const taskStatusText = computed(() => {
+  const map: Record<string, string> = {
+    completed: '✓ 完成', failed: '✗ 失败', cancelled: '取消', partial: '部分完成',
+  }
+  return map[latestCommandResult.value?.status ?? ''] ?? '—'
+})
+
+// ─── 视觉更新时间 ────────────────────────────────────────────────
+const visionLastUpdated = computed(() =>
+  lastUpdatedAt.value ? '更新: ' + formatTime(lastUpdatedAt.value) : '等待视觉推送'
+)
+
+// ─── 时间格式化 ──────────────────────────────────────────────────
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch { return iso }
 }
 
-function handleMicToggle() {
-  if (dialogState.value === 'LISTENING') {
-    voiceStore.setState('IDLE');
-  } else {
-    voiceStore.setState('LISTENING');
-  }
+// ─── 对话历史滚动 ────────────────────────────────────────────────
+const historyRef = ref<HTMLElement | null>(null)
+watch(transcript, async () => {
+  await nextTick()
+  if (historyRef.value) historyRef.value.scrollTop = historyRef.value.scrollHeight
+}, { deep: true })
+
+// ─── 清空对话历史 ────────────────────────────────────────────────
+function clearHistory(): void {
+  voiceStore.reset()
 }
 </script>
 
 <style scoped>
-.voice-view {
+.status-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
   gap: var(--spacing-4);
+  height: 100%;
+  overflow: hidden;
 }
 
-.status-bar {
+.page-header {
   display: flex;
+  align-items: baseline;
+  gap: var(--spacing-4);
+  flex-shrink: 0;
+}
+
+.header-hint {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* ─── 第一行卡片 ─────────────────────────────────────────────── */
+.row-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-3);
+  flex-shrink: 0;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.balance-val {
+  font-size: 1.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  transition: color 0.3s;
+}
+
+.balance-val.stable { color: var(--status-success); }
+
+.unit {
+  font-size: 0.85rem;
+  font-weight: 400;
+  margin-left: 3px;
+  opacity: 0.7;
+}
+
+.status-val {
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+.status-val.ok   { color: var(--status-success); }
+.status-val.err  { color: var(--status-error); }
+.status-val.warn { color: var(--status-warning); }
+.status-val.neutral { color: var(--text-secondary); }
+
+.card-sub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  opacity: 0.5;
+  margin-top: 2px;
+}
+
+/* 对话状态徽章 */
+.dialog-badge {
+  display: inline-flex;
   align-items: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-4);
-  background-color: var(--bg-card);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
+  gap: 6px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 4px 0;
 }
 
-.status-indicator {
-  width: 12px;
-  height: 12px;
+.badge-dot {
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background-color: var(--status-idle);
+  background: #555;
+  flex-shrink: 0;
 }
-
-.status-bar.idle .status-indicator { background-color: var(--status-idle); }
-.status-bar.listening .status-indicator { 
-  background-color: var(--status-success); 
-  animation: pulse 1.5s infinite;
-}
-.status-bar.processing .status-indicator { background-color: var(--primary-blue); }
-.status-bar.asking .status-indicator { background-color: var(--status-warning); }
-.status-bar.executing .status-indicator { background-color: var(--primary-blue); }
-.status-bar.feedback .status-indicator { background-color: var(--status-success); }
-.status-bar.error .status-indicator { background-color: var(--status-error); }
+.dialog-badge.idle       .badge-dot { background: #555; }
+.dialog-badge.listening  .badge-dot { background: var(--status-success); animation: pulse 1.2s infinite; }
+.dialog-badge.processing .badge-dot { background: var(--primary-blue); animation: pulse 0.8s infinite; }
+.dialog-badge.asking     .badge-dot { background: var(--status-warning); animation: pulse 1.0s infinite; }
+.dialog-badge.executing  .badge-dot { background: var(--primary-blue); animation: pulse 0.7s infinite; }
+.dialog-badge.feedback   .badge-dot { background: var(--status-success); }
+.dialog-badge.error      .badge-dot { background: var(--status-error); animation: pulse 0.4s infinite; }
+.dialog-badge.idle { color: var(--text-secondary); }
+.dialog-badge.listening  { color: var(--status-success); }
+.dialog-badge.processing { color: var(--primary-blue); }
+.dialog-badge.asking     { color: var(--status-warning); }
+.dialog-badge.executing  { color: var(--primary-blue); }
+.dialog-badge.feedback   { color: var(--status-success); }
+.dialog-badge.error      { color: var(--status-error); }
 
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(0, 215, 34, 0.4); }
-  70% { box-shadow: 0 0 0 10px rgba(0, 215, 34, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(0, 215, 34, 0); }
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
 }
 
-.main-grid {
-  display: grid;
-  grid-template-columns: 1fr 300px;
-  gap: var(--spacing-4);
+/* ─── 中间行 ─────────────────────────────────────────────────── */
+.row-mid {
+  grid-template-columns: 1fr 1fr;
+  flex-shrink: 0;
+}
+
+.mid-card { display: flex; flex-direction: column; gap: 6px; }
+
+.station-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.station-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  min-width: 56px;
+}
+.station-chip.occupied {
+  background: rgba(34, 197, 94, 0.10);
+  border-color: var(--status-success);
+}
+.s-id { font-weight: 600; color: var(--text-secondary); }
+.s-state { color: var(--text-secondary); opacity: 0.7; font-size: 0.7rem; }
+
+.task-status {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.task-status.completed { color: var(--status-success); }
+.task-status.failed    { color: var(--status-error); }
+.task-status.cancelled { color: var(--text-secondary); }
+.task-status.partial   { color: var(--status-warning); }
+.task-id  { font-size: 0.75rem; color: var(--text-secondary); opacity: 0.6; }
+.task-err { font-size: 0.82rem; color: var(--status-error); margin-top: 4px; }
+
+/* ─── 对话历史 ───────────────────────────────────────────────── */
+.history-card {
   flex: 1;
   min-height: 0;
-}
-
-.interaction-col {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-4);
+  overflow: hidden;
 }
 
-.interaction-card {
-  flex: 1;
-  background-color: var(--bg-card);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  padding: var(--spacing-5);
+.card-label-inline {
   display: flex;
-  flex-direction: column;
-  gap: var(--spacing-4);
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-bottom: var(--spacing-2);
+  flex-shrink: 0;
 }
 
 .ai-question {
-  background-color: rgba(255, 107, 0, 0.1);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(245, 158, 11, 0.10);
   border: 1px solid var(--status-warning);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-3);
   color: var(--status-warning);
-  padding: var(--spacing-4);
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  margin-bottom: var(--spacing-2);
+}
+
+.caption-bar {
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-card-hover);
   border-radius: var(--radius-sm);
-  font-size: 1.1rem;
-  font-weight: 500;
-}
-
-.caption-box {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  text-align: center;
-}
-
-.caption-text.placeholder {
+  font-size: 0.88rem;
   color: var(--text-secondary);
-  opacity: 0.5;
+  flex-shrink: 0;
+  margin-bottom: var(--spacing-2);
 }
-
-.balance-card {
-  height: 120px;
-  background-color: var(--bg-card);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  padding: var(--spacing-4);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.balance-title {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-}
-
-.balance-reading {
-  display: flex;
-  align-items: baseline;
-  gap: var(--spacing-2);
-  color: var(--text-secondary);
-}
-
-.balance-reading.stable {
-  color: var(--status-success);
-}
-
-.balance-reading .value {
-  font-size: 3rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.history-col {
-  background-color: var(--bg-card);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-}
-
-.history-title {
-  padding: var(--spacing-4);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-main);
-}
+.caption-live { color: var(--status-success); margin-right: 6px; }
 
 .history-list {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-4);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
+  padding-right: 4px;
 }
 
-.message {
+.history-msg {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-1);
+  gap: 3px;
 }
+.history-msg.user      { align-items: flex-end; }
+.history-msg.assistant { align-items: flex-start; }
 
 .msg-time {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
+  opacity: 0.5;
 }
 
-.msg-text {
+.msg-bubble {
+  max-width: 80%;
   padding: var(--spacing-2) var(--spacing-3);
-  border-radius: var(--radius-sm);
-  background-color: var(--bg-card-hover);
-  width: fit-content;
-  max-width: 90%;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  word-break: break-all;
 }
+.history-msg.user      .msg-bubble { background: #1d4ed8; color: #fff; border-bottom-right-radius: 4px; }
+.history-msg.assistant .msg-bubble { background: var(--bg-card-hover); color: var(--text-main); border-bottom-left-radius: 4px; }
 
-.message.user {
-  align-items: flex-end;
-}
-.message.user .msg-text {
-  background-color: rgba(20, 110, 245, 0.1);
-  color: var(--primary-blue);
-  border: 1px solid rgba(20, 110, 245, 0.2);
-}
-
-.empty-history {
+.empty-tip {
+  font-size: 0.85rem;
   color: var(--text-secondary);
-  text-align: center;
-  margin-top: var(--spacing-5);
+  opacity: 0.5;
 }
+.empty-tip.center { text-align: center; margin-top: var(--spacing-4); }
 
-.action-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  padding: var(--spacing-4) 0;
-}
-
-.cancel-btn {
-  position: absolute;
-  left: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  border-color: var(--border-color);
-}
-
-.connection-status {
-  position: absolute;
-  right: 0;
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-}
-.connection-status.connected {
-  color: var(--status-success);
-}
-
-.mic-btn {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  border: none;
-  background-color: var(--bg-card);
-  box-shadow: var(--shadow-main);
-  border: 1px solid var(--border-color);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.mic-btn .el-icon {
-  color: var(--text-main);
-}
-
-.mic-btn.active {
-  background-color: var(--status-error);
-  transform: scale(1.05);
-}
-
-.mic-btn:hover:not(.active) {
-  background-color: var(--bg-card-hover);
-}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
