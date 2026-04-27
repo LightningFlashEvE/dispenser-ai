@@ -175,7 +175,27 @@ install_melotts() {
   "$ROOT_DIR/melotts-git/venv/bin/pip" install -e "$ROOT_DIR/melotts-git"
   "$ROOT_DIR/melotts-git/venv/bin/pip" install "fastapi>=0.115" "uvicorn[standard]>=0.34"
   write_melotts_http_wrapper
-  "$ROOT_DIR/melotts-git/venv/bin/python" -c "from melo.api import TTS; TTS(language='ZH')"
+
+  # Replace generic PyTorch (cu130) with Jetson CUDA 12.6 wheel
+  local TORCH_URL="${TORCH_URL:-https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl}"
+  info "Replacing PyTorch with Jetson CUDA 12.6 wheel"
+  "$ROOT_DIR/melotts-git/venv/bin/pip" uninstall torch torchaudio torchvision -y 2>/dev/null || true
+  "$ROOT_DIR/melotts-git/venv/bin/pip" install --no-cache-dir "$TORCH_URL"
+
+  # Patch torchaudio imports (not available on Jetson; MeloTTS falls back gracefully)
+  local patched=0
+  for f in api utils split_utils; do
+    local src="$ROOT_DIR/melotts-git/melo/${f}.py"
+    if [ -f "$src" ] && grep -q "^import torchaudio$" "$src" 2>/dev/null; then
+      sed -i 's/^import torchaudio$/try:\n    import torchaudio\nexcept ImportError:\n    torchaudio = None/' "$src"
+      patched=$((patched + 1))
+    fi
+  done
+  info "Patched torchaudio imports in $patched files"
+
+  "$ROOT_DIR/melotts-git/venv/bin/python" -c "from melo.api import TTS; TTS(language='ZH'); import torch; assert torch.cuda.is_available(), 'CUDA not available'" || {
+    warn "MeloTTS CUDA init failed; TTS will use CPU"
+  }
 }
 
 usage() {
