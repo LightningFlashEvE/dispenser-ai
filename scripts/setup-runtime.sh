@@ -103,10 +103,11 @@ def get_model() -> TTS:
     global model, speaker_id
     if model is None:
         model = TTS(language="ZH")
-        speakers = getattr(model.hps.data, "spk2id", {}) or {}
-        speaker_id = speakers.get("ZH")
-        if speaker_id is None:
-            speaker_id = next(iter(speakers.values()))
+        speakers = getattr(model.hps.data, "spk2id", None) or {}
+        try:
+            speaker_id = speakers["ZH"]
+        except (TypeError, KeyError):
+            speaker_id = list(speakers.values())[0] if speakers else 0
     return model
 
 
