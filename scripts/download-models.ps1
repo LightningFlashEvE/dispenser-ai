@@ -26,9 +26,13 @@ function Download-File {
     Invoke-WebRequest -Uri $Url -OutFile $Output
 }
 
-# Configure this to your preferred model mirror. The file is intentionally not
-# committed because it is larger than normal GitHub repository limits.
-$QwenGgufUrl = if ($env:QWEN_GGUF_URL) { $env:QWEN_GGUF_URL } else { "TODO" }
+# Stable Hugging Face "resolve" URL. Hugging Face may redirect this to a
+# short-lived cas-bridge.xethub signed URL; do not commit those signed URLs.
+$QwenGgufUrl = if ($env:QWEN_GGUF_URL) {
+    $env:QWEN_GGUF_URL
+} else {
+    "https://huggingface.co/Edge-Quant/Qwen3-4B-Instruct-2507-Q4_K_M-GGUF/resolve/main/qwen3-4b-instruct-2507-q4_k_m.gguf"
+}
 
 $WhisperBaseUrl = if ($env:WHISPER_BASE_URL) {
     $env:WHISPER_BASE_URL

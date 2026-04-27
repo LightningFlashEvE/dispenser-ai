@@ -252,19 +252,21 @@ npm install
 
 | 模型 | 是否自动 | 放置路径 |
 |------|----------|----------|
-| Qwen GGUF | 半自动：你提供 `QWEN_GGUF_URL`，脚本下载 | `models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` |
+| Qwen GGUF | 自动：默认使用 Hugging Face 稳定 `resolve/main` 地址；也可用 `QWEN_GGUF_URL` 覆盖 | `models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` |
 | Whisper base | 自动下载 | `models/whisper/ggml-base.bin` |
 | Whisper small | 设置 `DOWNLOAD_WHISPER_SMALL=1` 后自动下载 | `models/whisper/ggml-small.bin` |
 
 ```bash
 cd ~/dispenser-ai
 
-# Qwen 模型需要先配置实际下载地址；可用 Hugging Face、ModelScope、对象存储或内网镜像。
-export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 的下载地址>"
+# 默认会下载 Qwen；如 Hugging Face 不通，可用 QWEN_GGUF_URL 覆盖为 ModelScope、对象存储或内网镜像。
+# export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 的下载地址>"
 
 # 默认下载 whisper base；如要 small，增加 DOWNLOAD_WHISPER_SMALL=1
 DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 ```
+
+不要把 `cas-bridge.xethub.hf.co` 这类带 `X-Amz-Signature` 的临时链接写进仓库；它们通常会过期。脚本内置的是稳定的 `huggingface.co/.../resolve/main/...` 地址。
 
 确认模型路径与 `backend/.env` 一致：
 

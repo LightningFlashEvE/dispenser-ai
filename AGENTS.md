@@ -288,8 +288,9 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 # 编译/安装不进 Git 的外部运行时：llama.cpp、whisper.cpp、MeloTTS
 ./scripts/setup-runtime.sh
 
-# 下载外部模型资产；Qwen 需先配置实际下载地址
-export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
+# 下载外部模型资产；Qwen 默认使用稳定 Hugging Face resolve/main 地址，
+# Hugging Face 不通时可用 QWEN_GGUF_URL 临时覆盖
+# export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
 DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 ```
 

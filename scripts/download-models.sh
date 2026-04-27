@@ -26,9 +26,9 @@ download_file() {
   curl -L --fail --progress-bar "$url" -o "$output"
 }
 
-# Configure this to your preferred model mirror. The file is intentionally not
-# committed because it is larger than normal GitHub repository limits.
-QWEN_GGUF_URL="${QWEN_GGUF_URL:-TODO}"
+# Stable Hugging Face "resolve" URL. Hugging Face may redirect this to a
+# short-lived cas-bridge.xethub signed URL; do not commit those signed URLs.
+QWEN_GGUF_URL="${QWEN_GGUF_URL:-https://huggingface.co/Edge-Quant/Qwen3-4B-Instruct-2507-Q4_K_M-GGUF/resolve/main/qwen3-4b-instruct-2507-q4_k_m.gguf}"
 
 WHISPER_BASE_URL="${WHISPER_BASE_URL:-https://huggingface.co/ggml-org/whisper.cpp/resolve/main/ggml-base.bin}"
 WHISPER_SMALL_URL="${WHISPER_SMALL_URL:-https://huggingface.co/ggml-org/whisper.cpp/resolve/main/ggml-small.bin}"

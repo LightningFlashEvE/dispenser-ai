@@ -26,12 +26,15 @@
 models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 ```
 
-该文件当前约 2.4GB，不适合直接进入 Git。推荐放在 Hugging Face、ModelScope、对象存储或内网镜像中，然后通过环境变量交给下载脚本：
+该文件当前约 2.4GB，不适合直接进入 Git。脚本默认使用 Hugging Face 稳定 `resolve/main` 地址下载到固定路径；如 Hugging Face 不通，可用 ModelScope、对象存储或内网镜像地址覆盖：
 
 ```bash
+# 可选覆盖；默认不需要设置
 export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
 ./scripts/download-models.sh
 ```
+
+不要把 `cas-bridge.xethub.hf.co` 这类带 `X-Amz-Signature` 的临时签名链接写进仓库；它们通常会过期，只适合临时作为 `QWEN_GGUF_URL` 使用。
 
 ### Whisper 模型
 
