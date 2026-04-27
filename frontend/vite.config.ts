@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+const useHttps = process.env.USE_HTTPS === 'true'
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -10,10 +12,18 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',   // 允许局域网访问（触摸屏、笔记本都能连）
+    host: '0.0.0.0',
     port: 5173,
+    allowedHosts: true,
+    https: useHttps
+      ? {
+          // 自签名证书（仅供开发/内网测试）
+          // 浏览器首次访问会提示"证书不受信任"，点击"高级"→"继续前往"即可
+          cert: process.env.SSL_CERT_PATH || undefined,
+          key: process.env.SSL_KEY_PATH || undefined,
+        }
+      : undefined,
     proxy: {
-      // 开发时代理到 FastAPI 后端，避免跨域
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

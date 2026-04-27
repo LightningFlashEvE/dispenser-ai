@@ -8,7 +8,7 @@
 
 后端运行在 Jetson 主控上，负责：
 
-1. 语音链路：VAD → ASR(whisper.cpp) → LLM(Ollama) → intent_json → 规则引擎 → command JSON → TTS(MeloTTS)
+1. 语音链路：VAD → ASR(whisper.cpp) → LLM(llama.cpp server) → intent_json → 规则引擎 → command JSON → TTS(MeloTTS)
 2. 视觉链路：固定 ROI 检测 → 二维码识别 → 坐标换算
 3. 天平驱动：MT-SICS over RS422-USB，读取重量 → mg 整数 → WebSocket 推前端 + 执行监控
 4. 控制适配层：intent_json 校验（`shared/intent_schema.json`）、规则引擎、状态机、command JSON 生成（`shared/command_schema.json`）、TCP 通信
@@ -26,8 +26,8 @@
 | Pydantic v2 | 输入输出校验 |
 | SQLite + JSON | 本地数据存储 |
 | whisper.cpp | 本地离线 ASR |
-| 本地 LLM（Ollama） | 任务级 JSON 生成；通过 `http://localhost:11434/v1` OpenAI 兼容接口调用；配置 `OLLAMA_KEEP_ALIVE=0` 推理后立即释放 GPU |
-| MeloTTS | 本地离线 TTS |
+| llama.cpp server | 本地 LLM 服务；通过 `http://localhost:8080/v1` OpenAI 兼容接口调用；模型 Qwen3-4B-Instruct-2507-Q4_K_M（约 2.5GB 显存）；全层 GPU 推理 |
+| MeloTTS (独立服务) | TTS 服务化运行于 `http://127.0.0.1:8020`，独立 venv 隔离，文本前置规范化 |
 | OpenCV | 视觉识别与坐标相关处理 |
 | pyserial | 天平 MT-SICS 串口通信（RS422-USB） |
 
@@ -35,7 +35,7 @@
 
 ## 关键边界
 
-1. LLM 只输出 `intent_json`（格式见 `shared/intent_schema.json`），不输出 command JSON
+1. LLM **在对话阶段输出自然语言**（dialog_reply），**在命令阶段输出 intent_json**（格式见 `shared/intent_schema.json`）
 2. `command JSON`（格式见 `shared/command_schema.json`）由规则引擎生成，字段值来自数据库
 3. 后端天平驱动只负责读数，不直接控制下料电机（下料由 C++ 控制）
 4. 后端不直接进行设备级动作控制（机械臂/电机/IO 联锁均由 C++ 负责）
@@ -52,7 +52,7 @@ backend/
 │   ├── ws/                         # WebSocket（语音交互、天平实时数据推送）
 │   ├── core/                       # 配置、日志、异常处理
 │   ├── services/
-│   │   ├── ai/                     # ASR(whisper.cpp) / LLM(Ollama) / TTS(MeloTTS) / VAD
+│   │   ├── ai/                     # ASR(whisper.cpp) / LLM(llama.cpp) / TTS(MeloTTS) / VAD
 │   │   ├── vision/                 # ROI检测 / QRCodeDetector / 坐标换算
 │   │   ├── dialog/                 # 意图解析、槽位管理、规则引擎、状态机
 │   │   ├── device/
@@ -68,22 +68,49 @@ backend/
 
 ## 核心执行链路
 
+系统采用**两阶段对话交互**：
+
+### 阶段一：对话阶段（Dialog Mode）
+
 ```
-ASR（whisper.cpp）/ 表单输入
+二进制 PCM 音频帧 / 表单输入
   ↓
-LLM（Ollama）→ intent_json（shared/intent_schema.json）
+audio.commit → whisper-server ASR → asr.final
   ↓
-规则引擎：校验 intent_json + 查药品库 → command JSON（shared/command_schema.json）
+LLM process_dialog() → dialog_reply（自然语言，force_json=False）
+  ↓
+WebSocket 推 dialog_reply → 前端展示 + TTS 播报
+```
+
+- `process_dialog()`：自然语言交互，`force_json=False`，`DIALOG_SYSTEM_PROMPT`
+- 用于闲聊、查询、补槽澄清；**不**生成 intent_json
+- 对话阶段**不阻塞**：LLM 输出自然语言回复后立刻返回，**不串行调用**后台 intent 解析
+- 用户可自由多轮对话，补充槽位信息
+- 前端录音开始前必须先确认 WebSocket 已连接；若连接断开，直接提示并取消本次录音，避免无效音频提交
+
+### 阶段二：命令阶段（Command Mode）
+
+```
+用户点击"确认执行"按钮 → 前端发 confirm 消息
+  ↓
+LLM resolve_intent_from_dialog() → 从完整对话历史解析 intent_json（force_json=True）
+  ↓
+规则引擎：校验 intent_json + 查药品库 → command JSON
   ↓
 状态机：确认设备就绪
   ↓
 TCP 下发 command JSON → C++ 后级控制程序
   ↓
-执行回调（TCP）→ 日志落库 + WebSocket 推前端
+执行回调 → 日志落库 + WebSocket 推前端
 
 天平（并行常驻）：
 pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 ```
+
+- `resolve_intent_from_dialog()`：从**完整对话历史**中解析意图
+  - 若信息不足：返回反问，用户继续补充
+  - 若信息完整：规则引擎校验 → command JSON → 状态机 → TCP 下发 → C++ 执行
+- **必须**通过规则引擎校验和状态机检查后才能执行
 
 ---
 
@@ -112,11 +139,27 @@ pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 ## 配置建议
 
 ```env
+# ASR (whisper-server HTTP 服务)
+WHISPER_SERVER_URL=http://127.0.0.1:8081
 WHISPER_CPP_MODEL_PATH=models/whisper/ggml-base.bin
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_MODEL=qwen2.5:7b
-OLLAMA_KEEP_ALIVE=0
-MELOTTS_MODEL_PATH=models/melotts
+WHISPER_LANGUAGE=zh
+WHISPER_VAD_THRESHOLD=0.5
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHUNK_SIZE_MS=100
+AUDIO_MAX_BUFFER_MS=30000
+
+# LLM (llama.cpp server)
+LLM_BASE_URL=http://localhost:8080/v1
+LLM_MODEL_PATH=models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+LLM_CONTEXT_LENGTH=4096
+LLM_MAX_TOKENS=1024
+LLM_TEMPERATURE=0.1
+LLM_GP_LAYERS=99
+LLM_THREADS=6
+TTS_PROVIDER=melotts
+TTS_BASE_URL=http://localhost:8020
+TTS_TIMEOUT_SEC=60
+TTS_PLAY_DEFAULT=true
 SQLITE_DB_PATH=data/app.db
 RULES_CONFIG_PATH=config/rules.json
 INTENT_SCHEMA_PATH=../shared/intent_schema.json
@@ -159,21 +202,44 @@ BALANCE_BAUD_RATE=9600
 - 用户未指定 `tolerance_mg` 时：`max(DEFAULT_TOLERANCE_MG, target_mass_mg * DEFAULT_TOLERANCE_PCT / 100)`
 - 默认值从配置读取：`DEFAULT_TOLERANCE_MG=10`，`DEFAULT_TOLERANCE_PCT=2.0`
 
-### 对话状态（内存模式 · 任务级清空策略）
+### 对话状态（内存维护 · 任务级清空策略）
 
-**当前策略：任务级清空（方案A）**
+**当前策略：任务级清空**
 每次任务完成/取消/出错后立即清空对话历史，补槽期间保留当次对话，上限 `DIALOG_MAX_ROUNDS` 轮。
 
 选择原因：配药操作是单任务一问一答模式，用户不会跨任务引用历史，实现最简单。
 
-**如后期需要改策略，备选方案：**
-- 方案B：固定最近 N 轮滚动（不管任务边界，始终保留最近 N 轮）
-- 方案C：Token 预算（累计超过阈值时删最早轮次，最精确但需引入 tokenizer）
-
 **实现要点：**
-- 对话历史仅在内存中维护（`dict[session_id, list[Message]]`），进程重启后对话重置
-- 单次任务最大补槽轮数：`DIALOG_MAX_ROUNDS=8`，超出后重置并 TTS 提示"请重新描述您的操作"
-- 任务完成/取消/出错后立即清空当前 session 的对话历史
+- 一个 WebSocket 连接 = 一个 `Session` 实例（`app/services/dialog/session.py`），完全内存态。
+- WebSocket 会话标识通过 query 参数 `session_id` 传入，例如 `/ws/voice?session_id=...`，用于恢复历史对话。
+- 每个 Session 内含 `dialog_history`（自然语言）与 `intent_history`（结构化 JSON）两条独立列表，分别注入给 LLM 的 dialog / intent 两个调用，避免格式互相污染。
+- 单次任务最大补槽轮数：`DIALOG_MAX_ROUNDS=8`，超出后重置并 TTS 提示"对话轮数过多，已重置"。
+- 任务完成/取消/出错后立即调用 `session.reset()` 清空。
+
+### WebSocket 语音消息（当前协议）
+
+- 前端发送：
+  - `[binary frame]`：PCM Int16 音频帧
+  - `audio.commit`：本轮录音结束，触发 ASR
+  - `chat.user_text`：文本输入
+  - `barge_in`：打断当前 TTS 播放
+- 后端返回：
+  - `state.update`：`listening / recognizing / thinking / speaking / awaiting_confirmation / idle`
+  - `asr.final`：ASR 最终转写
+  - `chat.delta` / `chat.done`：AI 流式回复
+  - `pending_intent` / `pending_cleared`
+  - `tts.chunk` / `tts.done` / `tts_end`
+- 兼容旧协议：
+  - `audio_chunk` / `audio_end` / `transcript`
+  - 旧版 base64 音频块必须做异常保护，坏包只返回错误，不允许打断整个 WebSocket 会话
+
+### Pending Intent 确认机制
+
+- 用户描述完整意图（`is_complete=true` + 业务校验通过 + 药品匹配成功）后，dispatcher 会创建 `PendingIntent` 并通过 WebSocket 推 `pending_intent` 消息。
+- 前端 "确认执行" 按钮只在 `pending_intent != null` 时启用。
+- 用户点击或说精确关键词（`确认执行 / 确认 / 开始执行 / 执行`）触发 `confirm` 消息。
+- `PENDING_INTENT_TTL_SEC` 秒后自动过期（默认 60s），避免误执行。
+- 不再用 `好的 / 是的 / 可以` 等宽泛关键词触发执行。
 
 ## 天平通信说明（梅特勒 WKC204C）
 

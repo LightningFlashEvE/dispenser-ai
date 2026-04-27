@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.services.dialog.intent import INTENT_TYPES, SLOT_RULES, validate_intent
-from app.services.dialog.rules import INTENT_TO_COMMAND, build_command
+from app.services.dialog.intent import INTENT_TYPES, INTENT_TYPES_NO_SLOTS, SLOT_RULES, validate_intent
+from app.services.dialog.rules import VALID_COMMAND_TYPES, build_command
 from app.services.dialog.state_machine import DeviceState, StateMachine
 
 
@@ -28,7 +28,7 @@ class TestIntentValidation:
     def test_valid_dispense_complete(self):
         intent = {
             "schema_version": "1.0",
-            "intent_type": "dispense_powder",
+            "intent_type": "dispense",
             "is_complete": True,
             "missing_slots": [],
             "reagent_hint": {"raw_text": "氯化钠"},
@@ -44,7 +44,7 @@ class TestIntentValidation:
     def test_invalid_dispense_missing_vessel(self):
         intent = {
             "schema_version": "1.0",
-            "intent_type": "dispense_powder",
+            "intent_type": "dispense",
             "is_complete": True,
             "missing_slots": [],
             "reagent_hint": {"raw_text": "氯化钠"},
@@ -60,7 +60,7 @@ class TestIntentValidation:
     def test_dispense_incomplete_returns_clarification(self):
         intent = {
             "schema_version": "1.0",
-            "intent_type": "dispense_powder",
+            "intent_type": "dispense",
             "is_complete": False,
             "missing_slots": ["params.target_vessel"],
             "clarification_question": "请问放到哪个容器？",
@@ -77,14 +77,14 @@ class TestIntentValidation:
         assert not is_valid
 
     def test_query_types_always_valid(self):
-        for itype in ("query_stock", "query_device_status", "cancel_task", "emergency_stop"):
+        for itype in ("query_stock", "device_status", "cancel", "emergency_stop"):
             intent = {"intent_type": itype, "is_complete": True}
             is_valid, errors, _ = validate_intent(intent)
             assert is_valid, f"{itype} 应该直接通过"
 
     def test_mass_exceeds_capacity(self):
         intent = {
-            "intent_type": "dispense_powder",
+            "intent_type": "dispense",
             "is_complete": True,
             "reagent_hint": {"raw_text": "NaCl"},
             "params": {"target_mass_mg": 999999, "target_vessel": "A1"},
@@ -95,7 +95,7 @@ class TestIntentValidation:
 
     def test_mix_fraction_sum_check(self):
         intent = {
-            "intent_type": "mix_powder",
+            "intent_type": "mix",
             "is_complete": True,
             "params": {
                 "total_mass_mg": 5000,
@@ -109,8 +109,8 @@ class TestIntentValidation:
         assert not is_valid
         assert any("fraction" in e for e in errors)
 
-    def test_save_formula_valid(self):
-        intent = {"intent_type": "save_formula", "is_complete": True}
+    def test_formula_valid(self):
+        intent = {"intent_type": "formula", "is_complete": True}
         is_valid, errors, _ = validate_intent(intent)
         assert is_valid
 
@@ -125,9 +125,9 @@ class TestIntentValidation:
         assert is_valid
 
     def test_all_intent_types_have_rules_or_passthrough(self):
-        passthrough = {"query_stock", "query_device_status", "save_formula", "cancel_task", "emergency_stop", "unknown"}
         for itype in INTENT_TYPES:
-            assert itype in SLOT_RULES or itype in passthrough, f"{itype} 没有槽位规则也不在免校验列表"
+            assert itype in SLOT_RULES or itype in INTENT_TYPES_NO_SLOTS, \
+                f"{itype} 没有槽位规则也不在免校验列表"
 
 
 class TestRuleEngine:
@@ -135,7 +135,7 @@ class TestRuleEngine:
     @pytest.mark.asyncio
     async def test_dispense_command_structure(self):
         intent = {
-            "intent_type": "dispense_powder",
+            "intent_type": "dispense",
             "params": {"target_mass_mg": 5000, "target_vessel": "A1"},
         }
         drug = {
@@ -157,7 +157,7 @@ class TestRuleEngine:
     @pytest.mark.asyncio
     async def test_mix_has_execution_mode(self):
         intent = {
-            "intent_type": "mix_powder",
+            "intent_type": "mix",
             "params": {
                 "total_mass_mg": 5000,
                 "components": [
@@ -181,12 +181,13 @@ class TestRuleEngine:
         assert cmd["payload"]["added_mass_mg"] == 50000
 
     @pytest.mark.asyncio
-    async def test_all_intent_types_have_command_mapping(self):
-        passthrough = {"unknown"}
+    async def test_all_intent_types_are_valid_commands(self):
+        """契约校验：intent_type（除 unknown）必须全部是合法的 command_type。"""
         for itype in INTENT_TYPES:
-            if itype in passthrough:
+            if itype == "unknown":
                 continue
-            assert itype in INTENT_TO_COMMAND, f"intent_type '{itype}' 缺少 INTENT_TO_COMMAND 映射"
+            assert itype in VALID_COMMAND_TYPES, \
+                f"intent_type '{itype}' 不在 VALID_COMMAND_TYPES 中"
 
 
 class TestStateMachine:

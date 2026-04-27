@@ -1,7 +1,6 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -35,10 +34,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
+    """创建所有 ORM 模型对应的数据表，并插入种子数据。"""
+    import app.models  # noqa: F401 — 延迟导入，避免循环依赖
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        task_columns = await conn.execute(text("PRAGMA table_info(tasks)"))
-        column_names = {row[1] for row in task_columns.fetchall()}
-        if "command_id" not in column_names:
-            await conn.execute(text("ALTER TABLE tasks ADD COLUMN command_id VARCHAR(36)"))
-            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_command_id ON tasks (command_id)"))
+
+    from app.core.seed_data import seed_database
+    await seed_database()
+
+    from app.core.seed_formulas import seed_formulas
+    await seed_formulas()

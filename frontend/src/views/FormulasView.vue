@@ -1,265 +1,219 @@
 <template>
-  <div class="view-container">
+  <div class="page">
     <div class="page-header">
-      <h2>配方库</h2>
-      <div class="actions">
-        <el-button type="primary" @click="openAdd">创建配方</el-button>
+      <div class="page-title-block">
+        <h1 class="page-title">配方管理</h1>
+        <span class="page-subtitle">{{ formulasStore.formulas.length }} 条配方</span>
+      </div>
+      <div class="page-actions">
+        <el-input v-model="searchQ" placeholder="搜索配方名称 / ID..." clearable style="width:240px" />
+        <el-button type="primary" @click="openCreate">+ 新增配方</el-button>
+        <el-button @click="formulasStore.fetchAll()">刷新</el-button>
       </div>
     </div>
-
-    <el-card class="content-card">
-      <el-table v-loading="loading" :data="formulas" style="width:100%" stripe border size="large">
-        <template #empty><div class="empty-state">暂无配方数据</div></template>
-        <el-table-column prop="formula_id"   label="配方ID"   width="200" />
-        <el-table-column prop="formula_name" label="配方名称" width="200" />
-        <el-table-column label="步骤数" width="90">
-          <template #default="{ row }">{{ row.steps?.length ?? 0 }}</template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" />
-        <el-table-column label="操作" width="160" fixed="right">
+    <el-alert v-if="formulasStore.error" :title="formulasStore.error" type="error" show-icon style="margin:0 20px 12px" />
+    <div class="table-wrap">
+      <el-table v-loading="formulasStore.loading" :data="displayFormulas" row-key="formula_id" stripe height="100%" style="width:100%">
+        <el-table-column type="expand">
           <template #default="{ row }">
-            <el-button link type="primary" size="large" @click="openDetail(row)">详情</el-button>
-            <el-button link type="primary" size="large" @click="openEdit(row)">编辑</el-button>
+            <div class="steps-expand">
+              <div v-if="!row.steps?.length" class="steps-empty">暂无步骤</div>
+              <div v-else class="steps-list">
+                <div v-for="step in sortedSteps(row.steps)" :key="step.id" class="step-item">
+                  <span class="step-idx">{{ step.step_index }}</span>
+                  <span class="step-type">{{ step.command_type }}</span>
+                  <span v-if="step.reagent_code" class="step-reagent">{{ step.reagent_code }}</span>
+                  <span v-if="step.target_mass_mg" class="step-mass">
+                    {{ step.target_mass_mg.toLocaleString() }} mg<span v-if="step.tolerance_mg" class="step-tol"> ±{{ step.tolerance_mg }}</span>
+                  </span>
+                  <span v-if="step.target_vessel" class="step-vessel">→ {{ step.target_vessel }}</span>
+                  <span v-if="step.step_name" class="step-name">{{ step.step_name }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="formula_id" label="配方 ID" width="130" />
+        <el-table-column prop="formula_name" label="配方名称" min-width="160" show-overflow-tooltip />
+        <el-table-column label="别名" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-for="a in row.aliases_list" :key="a" class="badge">{{ a }}</span>
+            <span v-if="!row.aliases_list?.length" class="text-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="步骤数" width="80" align="center">
+          <template #default="{ row }"><span class="badge badge--blue">{{ row.steps?.length ?? 0 }}</span></template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="160" prop="updated_at" sortable>
+          <template #default="{ row }">{{ fmtDate(row.updated_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-button-group size="small">
+              <el-button @click="openEdit(row)">编辑</el-button>
+              <el-button type="danger" @click="confirmDelete(row)">删除</el-button>
+            </el-button-group>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </div>
 
-    <!-- 创建 / 编辑弹窗 -->
-    <el-dialog
-      v-model="editVisible"
-      :title="isEdit ? '编辑配方' : '创建配方'"
-      width="700px"
-      destroy-on-close
-    >
-      <el-form :model="editForm" :rules="editRules" ref="editFormRef" label-width="100px" size="large">
-        <el-form-item label="配方ID" prop="formula_id">
-          <el-input v-model="editForm.formula_id" :disabled="isEdit" placeholder="全局唯一，如 formula_001" />
+    <el-dialog v-model="dialogVisible" :title="editingFormula ? '编辑配方' : '新增配方'" width="780px" :close-on-click-modal="false" draggable>
+      <el-form ref="formRef" :model="formData" :rules="formRules" label-width="90px">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="配方 ID" prop="formula_id">
+              <el-input v-model="formData.formula_id" :disabled="!!editingFormula" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="配方名称" prop="formula_name">
+              <el-input v-model="formData.formula_name" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="别名">
+          <el-select v-model="formData.aliases_list" multiple filterable allow-create placeholder="输入后回车添加" />
         </el-form-item>
-        <el-form-item label="配方名称" prop="formula_name">
-          <el-input v-model="editForm.formula_name" />
-        </el-form-item>
-        <el-form-item label="别名（逗号分隔）">
-          <el-input v-model="aliasesStr" placeholder="如 标准缓冲液,PBS" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="editForm.notes" type="textarea" :rows="2" />
-        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="formData.notes" type="textarea" :rows="2" /></el-form-item>
+        <div class="steps-section">
+          <div class="steps-section-header">
+            <span class="steps-section-title">执行步骤</span>
+            <el-button size="small" @click="addStep">+ 添加步骤</el-button>
+          </div>
+          <div v-if="formData.steps.length === 0" class="steps-section-empty">暂无步骤，点击"添加步骤"</div>
+          <div v-for="(step, i) in formData.steps" :key="i" class="step-editor">
+            <div class="step-editor-head">
+              <span class="step-editor-idx">步骤 {{ step.step_index }}</span>
+              <el-input v-model="step.step_name" placeholder="步骤名称（可选）" style="flex:1;max-width:200px" size="small" />
+              <el-button type="danger" size="small" circle @click="removeStep(i)">✕</el-button>
+            </div>
+            <div class="step-editor-body">
+              <el-select v-model="step.command_type" style="width:130px" size="small">
+                <el-option label="配料 dispense" value="dispense" /><el-option label="分液 aliquot" value="aliquot" />
+                <el-option label="混合 mix" value="mix" /><el-option label="补货 restock" value="restock" />
+                <el-option label="等待 wait" value="wait" /><el-option label="其他 custom" value="custom" />
+              </el-select>
+              <el-input v-model="step.reagent_code" placeholder="药品编号" style="width:120px" size="small" />
+              <el-input-number v-model="step.target_mass_mg" :min="0" placeholder="目标质量(mg)" style="width:150px" size="small" />
+              <el-input-number v-model="step.tolerance_mg" :min="0" placeholder="允差(mg)" style="width:110px" size="small" />
+              <el-input v-model="step.target_vessel" placeholder="容器/工位" style="width:100px" size="small" />
+            </div>
+          </div>
+        </div>
       </el-form>
-
-      <!-- 步骤列表 -->
-      <div class="steps-header">
-        <span class="steps-title">步骤列表</span>
-        <el-button size="small" @click="addStep">+ 添加步骤</el-button>
-      </div>
-      <div v-for="(step, i) in editForm.steps" :key="i" class="step-row">
-        <div class="step-idx">#{{ i + 1 }}</div>
-        <el-form :model="step" inline size="default" class="step-form">
-          <el-form-item label="类型">
-            <el-select v-model="step.command_type" style="width:110px">
-              <el-option v-for="t in stepTypes" :key="t" :label="t" :value="t" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="步骤名">
-            <el-input v-model="step.step_name" style="width:120px" />
-          </el-form-item>
-          <el-form-item label="药品编号">
-            <el-input v-model="step.reagent_code" style="width:110px" placeholder="如 NaCl-AR" />
-          </el-form-item>
-          <el-form-item label="目标质量(mg)">
-            <el-input-number v-model="step.target_mass_mg" :min="1" style="width:110px" />
-          </el-form-item>
-          <el-form-item label="误差(mg)">
-            <el-input-number v-model="step.tolerance_mg" :min="0" style="width:90px" />
-          </el-form-item>
-          <el-form-item label="目标容器">
-            <el-input v-model="step.target_vessel" style="width:80px" placeholder="A1" />
-          </el-form-item>
-        </el-form>
-        <el-button type="danger" link size="small" @click="removeStep(i)">删除</el-button>
-      </div>
-
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
-
-    <!-- 详情 Drawer -->
-    <el-drawer v-model="detailVisible" title="配方详情" size="480px" destroy-on-close>
-      <template v-if="detailFormula">
-        <el-descriptions :column="1" border size="large">
-          <el-descriptions-item label="配方ID">{{ detailFormula.formula_id }}</el-descriptions-item>
-          <el-descriptions-item label="名称">{{ detailFormula.formula_name }}</el-descriptions-item>
-          <el-descriptions-item label="别名">{{ detailFormula.aliases_list?.join('、') || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ detailFormula.created_at }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="detail-steps-title">步骤明细</div>
-        <el-table :data="detailFormula.steps" border size="large" style="margin-top:8px">
-          <el-table-column prop="step_index"    label="#"        width="50" />
-          <el-table-column prop="step_name"     label="步骤名"   width="100" />
-          <el-table-column prop="command_type"  label="类型"     width="90" />
-          <el-table-column prop="reagent_code"  label="药品编号" width="110" />
-          <el-table-column prop="target_mass_mg" label="目标(mg)" width="90" />
-          <el-table-column prop="tolerance_mg"  label="误差(mg)" width="80" />
-          <el-table-column prop="target_vessel" label="容器"     width="70" />
-        </el-table>
-      </template>
-    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage } from 'element-plus'
-import { formulaApi, type Formula, type FormulaStep } from '@/services/api'
+import { ref, computed, onMounted, reactive } from 'vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useFormulasStore } from '@/stores/formulas'
+import type { Formula, FormulaCreate, FormulaUpdate, FormulaStepInput, FormulaStep } from '@/services/api'
 
-const formulas = ref<Formula[]>([])
-const loading  = ref(false)
+const formulasStore = useFormulasStore()
+onMounted(() => formulasStore.fetchAll())
 
-const loadData = async () => {
-  loading.value = true
-  try {
-    const { data } = await formulaApi.list()
-    formulas.value = data
-  } catch {
-    ElMessage.error('加载配方数据失败')
-  } finally {
-    loading.value = false
-  }
+const searchQ = ref('')
+const displayFormulas = computed(() => {
+  const q = searchQ.value.trim().toLowerCase()
+  if (!q) return formulasStore.formulas
+  return formulasStore.formulas.filter((f) =>
+    f.formula_id.toLowerCase().includes(q) || f.formula_name.toLowerCase().includes(q) ||
+    f.aliases_list.some((a) => a.toLowerCase().includes(q)))
+})
+function sortedSteps(steps: FormulaStep[]) { return [...steps].sort((a, b) => a.step_index - b.step_index) }
+
+const dialogVisible = ref(false)
+const editingFormula = ref<Formula | null>(null)
+const saving = ref(false)
+const formRef = ref<FormInstance | null>(null)
+interface FormModel { formula_id: string; formula_name: string; aliases_list: string[]; notes: string | null; steps: FormulaStepInput[] }
+const formData = reactive<FormModel>({ formula_id: '', formula_name: '', aliases_list: [], notes: null, steps: [] })
+const formRules: FormRules = {
+  formula_id:   [{ required: true, message: '请输入配方 ID',   trigger: 'blur' }],
+  formula_name: [{ required: true, message: '请输入配方名称', trigger: 'blur' }],
 }
-onMounted(loadData)
-
-// ─── 编辑弹窗 ─────────────────────────────────────────────────
-const editVisible  = ref(false)
-const isEdit       = ref(false)
-const saving       = ref(false)
-const editFormRef  = ref<FormInstance>()
-const stepTypes    = ['dispense', 'aliquot', 'mix', 'restock']
-
-interface EditForm {
-  formula_id: string
-  formula_name: string
-  notes: string
-  steps: Partial<FormulaStep>[]
+function resetForm() { Object.assign(formData, { formula_id: '', formula_name: '', aliases_list: [], notes: null, steps: [] }) }
+function openCreate() { editingFormula.value = null; resetForm(); dialogVisible.value = true }
+function openEdit(formula: Formula) {
+  editingFormula.value = formula
+  Object.assign(formData, {
+    formula_id: formula.formula_id, formula_name: formula.formula_name,
+    aliases_list: [...formula.aliases_list], notes: formula.notes,
+    steps: formula.steps.map((s) => ({ step_index: s.step_index, step_name: s.step_name,
+      command_type: s.command_type, reagent_code: s.reagent_code,
+      target_mass_mg: s.target_mass_mg, tolerance_mg: s.tolerance_mg, target_vessel: s.target_vessel })),
+  })
+  dialogVisible.value = true
 }
-
-const editForm = reactive<EditForm>({ formula_id: '', formula_name: '', notes: '', steps: [] })
-const aliasesStr = ref('')
-
-const editRules: FormRules = {
-  formula_id:   [{ required: true, message: '请填写配方ID' }],
-  formula_name: [{ required: true, message: '请填写配方名称' }],
+function addStep() {
+  const nextIdx = formData.steps.length > 0 ? Math.max(...formData.steps.map((s) => s.step_index)) + 1 : 1
+  formData.steps.push({ step_index: nextIdx, step_name: null, command_type: 'dispense', reagent_code: null, target_mass_mg: null, tolerance_mg: null, target_vessel: null })
 }
-
-function emptyStep(index: number): Partial<FormulaStep> {
-  return { step_index: index, step_name: '', command_type: 'dispense', reagent_code: '', target_mass_mg: 100, tolerance_mg: 5, target_vessel: '' }
-}
-
-function openAdd(): void {
-  isEdit.value = false
-  editForm.formula_id = ''; editForm.formula_name = ''; editForm.notes = ''
-  editForm.steps = []
-  aliasesStr.value = ''
-  editVisible.value = true
-}
-
-function openEdit(row: Formula): void {
-  isEdit.value = true
-  editForm.formula_id   = row.formula_id
-  editForm.formula_name = row.formula_name
-  editForm.notes        = (row as Formula & { notes?: string }).notes ?? ''
-  editForm.steps        = (row.steps ?? []).map(s => ({ ...s }))
-  aliasesStr.value      = (row.aliases_list ?? []).join(', ')
-  editVisible.value = true
-}
-
-function addStep(): void {
-  editForm.steps.push(emptyStep(editForm.steps.length))
-}
-
-function removeStep(i: number): void {
-  editForm.steps.splice(i, 1)
-  editForm.steps.forEach((s, idx) => { s.step_index = idx })
-}
-
-async function handleSave(): Promise<void> {
-  await editFormRef.value?.validate()
+function removeStep(i: number) { formData.steps.splice(i, 1); formData.steps.forEach((s, idx) => { s.step_index = idx + 1 }) }
+async function submitForm() {
+  if (!formRef.value) return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   saving.value = true
   try {
-    const payload = {
-      formula_id:   editForm.formula_id,
-      formula_name: editForm.formula_name,
-      notes:        editForm.notes,
-      aliases_list: aliasesStr.value ? aliasesStr.value.split(',').map(s => s.trim()).filter(Boolean) : [],
-      steps: editForm.steps.map((s, i) => ({
-        step_index:    i,
-        step_name:     s.step_name ?? '',
-        command_type:  s.command_type ?? 'dispense',
-        reagent_code:  s.reagent_code ?? undefined,
-        target_mass_mg: s.target_mass_mg ?? undefined,
-        tolerance_mg:  s.tolerance_mg ?? undefined,
-        target_vessel: s.target_vessel ?? undefined,
-      })),
-    }
-    if (isEdit.value) {
-      await formulaApi.update(editForm.formula_id, payload)
-      ElMessage.success('更新成功')
+    if (editingFormula.value) {
+      await formulasStore.update(editingFormula.value.formula_id, { formula_name: formData.formula_name, aliases_list: formData.aliases_list, notes: formData.notes, steps: formData.steps } as FormulaUpdate)
+      ElMessage.success('配方已更新')
     } else {
-      await formulaApi.create(payload)
-      ElMessage.success('创建成功')
+      await formulasStore.create({ formula_id: formData.formula_id, formula_name: formData.formula_name, aliases_list: formData.aliases_list, notes: formData.notes, steps: formData.steps } as FormulaCreate)
+      ElMessage.success('配方已添加')
     }
-    editVisible.value = false
-    await loadData()
-  } catch (err: unknown) {
-    const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '操作失败'
-    ElMessage.error(msg)
-  } finally {
-    saving.value = false
-  }
+    dialogVisible.value = false
+  } catch (e: unknown) { ElMessage.error(e instanceof Error ? e.message : '操作失败') }
+  finally { saving.value = false }
 }
-
-// ─── 详情 Drawer ──────────────────────────────────────────────
-const detailVisible = ref(false)
-const detailFormula = ref<Formula | null>(null)
-
-async function openDetail(row: Formula): Promise<void> {
-  try {
-    const { data } = await formulaApi.get(row.formula_id)
-    detailFormula.value = data
-    detailVisible.value = true
-  } catch {
-    ElMessage.error('获取配方详情失败')
-  }
+async function confirmDelete(formula: Formula) {
+  await ElMessageBox.confirm(`确认删除配方「${formula.formula_name}」？`, '确认删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  try { await formulasStore.remove(formula.formula_id); ElMessage.success('已删除') }
+  catch (e: unknown) { ElMessage.error(e instanceof Error ? e.message : '删除失败') }
+}
+function fmtDate(iso: string) {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 </script>
 
 <style scoped>
-.view-container  { display:flex; flex-direction:column; gap:var(--spacing-4); height:100%; }
-.page-header     { display:flex; justify-content:space-between; align-items:center; }
-.content-card    { flex:1; }
-.empty-state     { padding:var(--spacing-6); color:var(--text-secondary); text-align:center; }
-
-.steps-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 16px 0 8px;
-}
-.steps-title { font-size:0.9rem; font-weight:600; color:var(--text-secondary); }
-
-.step-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-  background: var(--bg-card-hover);
-  border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-}
-.step-idx { font-weight:600; color:var(--text-secondary); padding-top:6px; width:28px; flex-shrink:0; }
-.step-form { flex:1; flex-wrap:wrap; }
-
-.detail-steps-title { font-size:0.9rem; font-weight:600; color:var(--text-secondary); margin-top:16px; }
+.page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.page-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--wf-border-dark); flex-shrink: 0; gap: 16px; flex-wrap: wrap; }
+.page-title-block { display: flex; align-items: baseline; gap: 10px; }
+.page-title { font-size: 32px; font-weight: 500; color: var(--wf-text-main); letter-spacing: -0.5px; }
+.page-subtitle { font-size: 14px; color: var(--wf-text-muted); font-weight: 500; }
+.page-actions { display: flex; align-items: center; gap: 8px; }
+.table-wrap { flex: 1; overflow: hidden; padding: 0 20px 20px; margin-top: 16px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #f0f0f0; color: var(--wf-text-muted); margin-right: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge--blue { background: rgba(20, 110, 245, 0.1); color: var(--wf-blue); }
+.text-muted { color: var(--wf-text-muted); font-size: 13px; }
+.steps-expand { padding: 12px 20px 12px 56px; }
+.steps-empty { color: var(--wf-text-muted); font-size: 13px; font-style: italic; }
+.steps-list { display: flex; flex-direction: column; gap: 6px; }
+.step-item { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 10px; background: #f8f8f8; border-radius: 4px; border: 1px solid var(--wf-border-dark); }
+.step-idx { width: 24px; height: 24px; border-radius: 50%; background: var(--wf-blue); color: var(--wf-white); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.step-type { font-weight: 600; color: var(--wf-text-main); min-width: 80px; }
+.step-reagent { color: var(--wf-purple); font-family: var(--wf-font-mono); font-size: 12px; background: rgba(122, 61, 255, 0.1); padding: 2px 6px; border-radius: 3px; }
+.step-mass { color: var(--wf-text-main); font-weight: 500; }
+.step-tol { color: var(--wf-text-muted); font-size: 11px; }
+.step-vessel { color: var(--wf-text-muted); }
+.step-name { color: var(--wf-text-muted); font-style: italic; margin-left: auto; }
+.steps-section { margin-top: 16px; border: 1px solid var(--wf-border-dark); border-radius: 6px; overflow: hidden; }
+.steps-section-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--wf-bg-panel); border-bottom: 1px solid var(--wf-border-dark); }
+.steps-section-title { font-size: 13px; font-weight: 600; color: var(--wf-text-main); }
+.steps-section-empty { padding: 16px 12px; color: var(--wf-text-muted); font-size: 13px; text-align: center; }
+.step-editor { border-bottom: 1px solid #f0f0f0; padding: 10px 12px; }
+.step-editor:last-child { border-bottom: none; }
+.step-editor-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.step-editor-idx { font-size: 12px; font-weight: 700; color: var(--wf-blue); min-width: 40px; }
+.step-editor-body { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 </style>

@@ -9,16 +9,10 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-INTENT_TO_COMMAND = {
-    "dispense_powder": "dispense",
-    "aliquot_powder": "aliquot",
-    "mix_powder": "mix",
-    "query_stock": "query_stock",
-    "query_device_status": "device_status",
-    "save_formula": "formula",
-    "restock": "restock",
-    "cancel_task": "cancel",
-    "emergency_stop": "emergency_stop",
+VALID_COMMAND_TYPES = {
+    "dispense", "aliquot", "mix", "formula",
+    "query_stock", "device_status",
+    "restock", "cancel", "emergency_stop",
 }
 
 COMMANDS_REQUIRING_CONFIRMATION = {
@@ -44,9 +38,10 @@ async def build_command(
     drug_info: dict | None = None,
 ) -> dict[str, Any]:
     intent_type = intent_data["intent_type"]
-    command_type = INTENT_TO_COMMAND.get(intent_type)
+    # 契约约定: intent_type 与 command_type 同名（v1.1 起）
+    command_type = intent_type
 
-    if command_type is None:
+    if command_type not in VALID_COMMAND_TYPES:
         raise ValueError(f"未知 intent_type: {intent_type}")
 
     payload_builder = {

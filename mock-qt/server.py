@@ -518,6 +518,7 @@ async def health() -> JSONResponse:
 def main() -> None:
     parser = argparse.ArgumentParser(description="mock-qt：模拟 C++ 后级控制程序")
     parser.add_argument("--port", type=int, default=None, help="监听端口（默认读 config.json）")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="监听地址")
     parser.add_argument("--config", type=str, default="config.json", help="配置文件路径")
     args = parser.parse_args()
 
@@ -535,7 +536,7 @@ def main() -> None:
     logger.info(f"  模拟称量偏差    : ±{CFG['actual_mass_deviation_pct']}%")
     logger.info("=" * 60)
 
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

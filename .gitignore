@@ -1,72 +1,98 @@
-# ============================================================
-# dispenser-ai .gitignore
-# ============================================================
-
-# ── Python ──────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
-
-# 虚拟环境
-.venv/
+﻿# Python
 venv/
-env/
-ENV/
-
-# pytest
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+build/
+dist/
 .pytest_cache/
-.coverage
-htmlcov/
-
-# mypy / ruff / pyright
 .mypy_cache/
 .ruff_cache/
 
-# ── 环境变量（含敏感信息，绝不提交）───────────────────────
-.env
-.env.local
-.env.production
-# .env.example 保留，供参考
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+.npm/
 
-# ── 模型文件（体积巨大，不入仓库）──────────────────────────
+# 敏感配置（保留模板）
+backend/.env
+.env.local
+.env.*.local
+
+# 数据库
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# 模型文件（体积过大）
 models/
-*.bin
 *.gguf
+*.bin
 *.ggml
 *.pt
 *.pth
 *.safetensors
-*.onnx
 
-# ── 数据库与运行时数据 ──────────────────────────────────────
-data/*.db
-data/*.sqlite
-data/*.sqlite3
-data/logs/
+# 编译产物
+*.so
+*.o
+*.a
+*.dylib
+*.dll
+libs/
+
+# 日志
+logs/
 *.log
 
-# ── Node.js / 前端 ──────────────────────────────────────────
-node_modules/
-frontend/dist/
-frontend/.vite/
-frontend/coverage/
+# 服务 PID 文件
+.*.pid
 
-# ── IDE ─────────────────────────────────────────────────────
+# 编辑器 / 系统
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 .DS_Store
 Thumbs.db
 
-# ── 标定与临时文件 ──────────────────────────────────────────
-config/calibration*.json
-*.tmp
+# 临时 / 备份
 *.bak
+*.bak.*
+*.tmp
+*.orig
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 测试覆盖率
+.coverage
+htmlcov/
+
+# 音频临时文件
+*.wav
+*.mp3
+*.pcm
+
+# Repository distribution guardrails
+.env
+mcp-server/.env
+**/venv/
+**/.venv/
+**/node_modules/
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/logs/
+*.so.*
+
+# External source/runtime assets restored by setup scripts
+llama.cpp/
+whisper.cpp/
+melotts-git/

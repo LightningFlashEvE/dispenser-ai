@@ -1,0 +1,13 @@
+* text=auto
+
+# Large runtime assets are intentionally not stored in this repository.
+*.gguf binary
+*.bin binary
+*.ggml binary
+*.pt binary
+*.pth binary
+*.safetensors binary
+*.onnx binary
+*.so binary
+*.so.* binary
+*.db binary

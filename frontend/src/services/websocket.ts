@@ -1,119 +1,139 @@
-import { useVoiceStore, type DialogState } from '@/stores/voice'
-import { useVisionStore } from '@/stores/vision'
-import { playTtsAudio, stopTtsPlayback } from './audio'
+/**
+ * websocket.ts  —  统一 WebSocket 连接 + 消息模型
+ */
 
-type WsMessage =
-  | { type: 'stt_partial'; text: string }
-  | { type: 'stt_final'; text: string }
-  | { type: 'state_change'; state: string }
-  | { type: 'question'; text: string }
-  | { type: 'tts_audio'; data: string; sample_rate?: number }
+export type SessionState =
+  | 'idle' | 'listening' | 'recognizing' | 'thinking'
+  | 'speaking' | 'awaiting_confirmation' | 'interrupted'
+  | 'IDLE' | 'LISTENING' | 'PROCESSING' | 'ASKING' | 'EXECUTING' | 'FEEDBACK' | 'ERROR'
+
+export interface PendingPayload {
+  intent_id: string | null
+  intent_type: string | null
+  params: Record<string, unknown>
+  reagent_hint: unknown
+  drug: { reagent_code: string | null; reagent_name_cn: string | null; station_id: string | null } | null
+  expires_at: string
+}
+
+export interface SlotFillingPayload { missing_slots: string[]; question: string }
+export interface CommandResultPayload { command_id: string; status: string; message?: string }
+
+export type InboundMsg =
+  | { type: 'connected'; client_id: string; timestamp: string }
+  | { type: 'state.update'; state: SessionState }
+  | { type: 'asr.partial'; text: string }
+  | { type: 'asr.final'; text: string; duration_ms?: number }
+  | { type: 'chat.delta'; text: string; seq: number }
+  | { type: 'chat.done'; text: string }
+  | { type: 'tts.chunk'; data: string; sample_rate: number; format: string; seq: number; text?: string }
+  | { type: 'tts.done' }
   | { type: 'tts_end' }
-  | { type: 'vision_result'; stations: unknown[] }
-  | { type: 'balance_reading'; mass_mg: number; stable: boolean; timestamp: string }
-  | { type: 'balance_over_limit'; mass_mg: number; timestamp: string }
+  | { type: 'pending_intent'; data: PendingPayload }
+  | { type: 'pending_cleared' }
+  | { type: 'slot_filling'; data: SlotFillingPayload }
+  | { type: 'question'; text: string }
+  | { type: 'dialog_reply'; text: string }
+  | { type: 'user_message'; text: string; timestamp: string }
   | { type: 'command_sent'; command_id: string }
-  | { type: 'command_result'; data: unknown }
+  | { type: 'command_result'; data: CommandResultPayload }
+  | { type: 'balance_reading'; value_mg: number; stable: boolean; timestamp: string }
+  | { type: 'balance_over_limit'; value_mg: number }
   | { type: 'error'; code: string; message: string }
-  | { type: 'connected' }
+  | { type: 'ping'; ts: string }
+  | { type: 'state_change'; state: string }
+  | { type: 'stt_final'; text: string; duration_ms?: number }
 
-let ws: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+export type OutboundMsg =
+  | { type: 'chat.user_text'; text: string; timestamp: string }
+  | { type: 'audio.commit' }
+  | { type: 'barge_in' }
+  | { type: 'confirm' }
+  | { type: 'cancel_pending' }
+  | { type: 'cancel' }
 
-export function connectWebSocket(url: string = `ws://${location.host}/ws/voice`) {
-  const voiceStore = useVoiceStore()
-  const visionStore = useVisionStore()
+export type MsgHandler = (msg: InboundMsg) => void
+export type ConnectionHandler = (connected: boolean) => void
 
-  if (ws && ws.readyState === WebSocket.OPEN) return
+export class VoiceWebSocket {
+  private ws: WebSocket | null = null
+  private _msgHandler: MsgHandler | null = null
+  private _connHandler: ConnectionHandler | null = null
+  private _url = ''
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private _shouldReconnect = false
+  private _reconnectDelay = 2000
 
-  ws = new WebSocket(url)
-
-  ws.onopen = () => {
-    voiceStore.setConnected(true)
-    if (reconnectTimer) clearTimeout(reconnectTimer)
+  connect(url: string, onMsg: MsgHandler, onConn?: ConnectionHandler): void {
+    this._url = url
+    this._msgHandler = onMsg
+    this._connHandler = onConn ?? null
+    this._shouldReconnect = true
+    this._doConnect()
   }
 
-  ws.onclose = () => {
-    voiceStore.setConnected(false)
-    reconnectTimer = setTimeout(() => connectWebSocket(url), 3000)
+  reconnectWithSession(sessionId: string): void {
+    const urlObj = new URL(this._url, location.href)
+    urlObj.searchParams.set('session_id', sessionId)
+    this.disconnect()
+    this._shouldReconnect = true
+    this._url = urlObj.toString()
+    this._doConnect()
   }
 
-  ws.onerror = () => {
-    ws?.close()
-  }
+  private _doConnect(): void {
+    if (this.ws && this.ws.readyState <= WebSocket.OPEN) return
+    this.ws = new WebSocket(this._url)
+    this.ws.binaryType = 'arraybuffer'
 
-  ws.onmessage = (event: MessageEvent) => {
-    let msg: WsMessage
-    try {
-      msg = JSON.parse(event.data as string) as WsMessage
-    } catch {
-      return
+    this.ws.onopen = () => {
+      this._connHandler?.(true)
+      this._reconnectDelay = 2000
     }
-
-    switch (msg.type) {
-      case 'stt_partial':
-        voiceStore.setCaption(msg.text)
-        break
-      case 'stt_final':
-        voiceStore.setCaption(msg.text)
-        voiceStore.addMessage({ role: 'user', text: msg.text, timestamp: new Date().toISOString() })
-        break
-      case 'state_change': {
-        const nextState = msg.state as DialogState
-        if (nextState === 'IDLE' || nextState === 'LISTENING') {
-          stopTtsPlayback()
-          voiceStore.setTtsSpeaking(false)
-        }
-        voiceStore.setState(nextState)
-        break
+    this.ws.onclose = () => {
+      this._connHandler?.(false)
+      if (this._shouldReconnect) {
+        this._reconnectTimer = setTimeout(() => {
+          this._reconnectDelay = Math.min(this._reconnectDelay * 1.5, 15000)
+          this._doConnect()
+        }, this._reconnectDelay)
       }
-      case 'tts_audio':
-        voiceStore.setTtsSpeaking(true)
-        playTtsAudio(msg.data, msg.sample_rate ?? 22050)
-        break
-      case 'tts_end':
-        voiceStore.setTtsSpeaking(false)
-        stopTtsPlayback()
-        break
-      case 'question':
-        voiceStore.setQuestion(msg.text)
-        voiceStore.addMessage({ role: 'assistant', text: msg.text, timestamp: new Date().toISOString() })
-        break
-      case 'vision_result':
-        visionStore.updateStations(msg.stations as Parameters<typeof visionStore.updateStations>[0])
-        break
-      case 'balance_reading':
-        visionStore.updateBalance({ mass_mg: msg.mass_mg, stable: msg.stable, timestamp: msg.timestamp })
-        break
-      case 'balance_over_limit':
-        visionStore.setOverLimit(true, `天平读数 ${msg.mass_mg} mg 超出量程`)
-        break
-      case 'command_result':
-        voiceStore.setCommandResult(msg.data as Parameters<typeof voiceStore.setCommandResult>[0])
-        break
-      case 'error':
-        break
-      case 'connected':
-        console.debug('WebSocket connected signal received')
-        break
+    }
+    this.ws.onerror = () => { /* onclose 处理重连 */ }
+    this.ws.onmessage = (evt: MessageEvent) => {
+      if (typeof evt.data !== 'string') return
+      let msg: InboundMsg
+      try { msg = JSON.parse(evt.data) as InboundMsg } catch { return }
+      this._msgHandler?.(msg)
     }
   }
-}
 
-export function sendAudioChunk(chunk: ArrayBuffer) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(chunk)
+  sendJson(msg: OutboundMsg): void {
+    if (!this._isOpen()) return
+    this.ws!.send(JSON.stringify(msg))
   }
-}
 
-export function sendJson(payload: Record<string, unknown>) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(payload))
+  sendAudioFrame(frame: ArrayBuffer): void {
+    if (!this._isOpen()) return
+    this.ws!.send(frame)
   }
-}
 
-export function disconnectWebSocket() {
-  if (reconnectTimer) clearTimeout(reconnectTimer)
-  ws?.close()
-  ws = null
+  commitAudio(): void { this.sendJson({ type: 'audio.commit' }) }
+  sendUserText(text: string): void {
+    this.sendJson({ type: 'chat.user_text', text, timestamp: new Date().toISOString() })
+  }
+  bargeIn(): void { this.sendJson({ type: 'barge_in' }) }
+  confirm(): void { this.sendJson({ type: 'confirm' }) }
+  cancelPending(): void { this.sendJson({ type: 'cancel_pending' }) }
+  cancelTask(): void { this.sendJson({ type: 'cancel' }) }
+
+  disconnect(): void {
+    this._shouldReconnect = false
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
+    this.ws?.close()
+    this.ws = null
+  }
+
+  get isConnected(): boolean { return this._isOpen() }
+  private _isOpen(): boolean { return this.ws !== null && this.ws.readyState === WebSocket.OPEN }
 }

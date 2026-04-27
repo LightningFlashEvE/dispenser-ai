@@ -64,10 +64,11 @@ frontend/
 ## 核心页面
 
 ### VoiceView.vue
-- 显示当前状态：待机 / 聆听 / 处理中 / 反问中 / 执行中 / 完成 / 错误
-- 显示实时转写文本
-- 显示 AI 反问文本和最终执行结果
-- 显示语音输入按钮与状态指示
+- 采用类似网页 AI 的对话流：用户消息气泡 → AI 流式回复气泡 → 待确认操作卡片
+- 显示当前状态：待机 / 聆听 / 识别中 / 思考中 / 回复中 / 等待确认 / 执行中 / 错误
+- 录音开始前先检查 WebSocket 连接；若未连接，立即提示，不进入“假录音”状态
+- 用户停止录音后统一提交 ASR，转写完成后落成一条用户消息，再进入 AI 回复
+- 显示语音输入按钮、连接异常提示、待确认操作与执行反馈
 
 ### VisionView.vue
 - 显示工位有无瓶状态
@@ -88,21 +89,34 @@ frontend/
 ## WebSocket 消息重点
 
 ### 前端→后端
-- `audio_chunk`
-- `audio_end`
+- `[binary frame]`：PCM Int16 音频帧
+- `audio.commit`
+- `chat.user_text`
+- `barge_in`
 - `cancel`
-- `ack_question`（用户已理解反问，继续输入）
+- `cancel_pending`
+- `confirm`（用户点击"确认执行"按钮，触发命令阶段）
 
 ### 后端→前端
-- `stt_partial`
-- `stt_final`
-- `state_change`
-- `question`（LLM 自动反问）
-- `tts_audio`
-- `vision_result`
+- `state.update`
+- `asr.partial`
+- `asr.final`
+- `chat.delta`
+- `chat.done`
+- `pending_intent`
+- `pending_cleared`
+- `slot_filling`
+- `dialog_reply`（对话阶段 LLM 自然语言回复，不含执行意图）
+- `tts.chunk`
+- `tts.done`
+- `tts_end`
+- `user_message`
 - `command_sent`
 - `command_result`
 - `error`
+
+### 兼容说明
+- 旧协议 `audio_chunk` / `audio_end` / `transcript` / `stt_final` 仍可兼容一段时间，但新代码默认走二进制音频帧 + `audio.commit` + `asr.final`
 
 ---
 
@@ -110,12 +124,12 @@ frontend/
 
 ```typescript
 interface VoiceState {
-  dialogState: 'IDLE' | 'LISTENING' | 'PROCESSING' | 'ASKING' | 'EXECUTING' | 'FEEDBACK' | 'ERROR'
-  realtimeCaption: string
-  transcript: Message[]
-  latestQuestion: string | null
-  latestCommandResult: CommandResult | null
+  dialogState: 'idle' | 'listening' | 'recognizing' | 'thinking' | 'speaking' | 'awaiting_confirmation' | 'executing' | 'error'
+  asrPartial: string
+  messages: ChatMessage[]
+  pendingIntent: PendingIntent | null
   isConnected: boolean
+  micError: MicError | null
 }
 
 interface VisionState {

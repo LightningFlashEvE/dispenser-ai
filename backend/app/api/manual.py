@@ -95,11 +95,11 @@ async def manual_command(
     # ── 急停特殊处理 ──────────────────────────────────────────────
     if req.command_type == "emergency_stop":
         state_machine.trigger_emergency_stop()
-        ok = await control_client.send_emergency_stop()
+        ok, reason = await control_client.send_emergency_stop()
         if not ok:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="急停指令下发失败，请检查控制程序连接",
+                detail=f"急停指令下发失败：{reason or '请检查控制程序连接'}",
             )
         logger.warning("手动急停指令已下发 command_id=%s", command_id)
         return {"command_id": command_id, "task_id": None, "status": "sent"}
@@ -124,16 +124,15 @@ async def manual_command(
     db.add(task)
     await db.commit()
 
-    ok = await control_client.send_command(command)
+    ok, reason = await control_client.send_command(command)
     if not ok:
-        # 更新任务状态为失败
         task.status = "FAILED"
-        task.error_message = "控制程序连接失败，指令未能下发"
+        task.error_message = reason or "控制程序连接失败，指令未能下发"
         task.completed_at = datetime.now(timezone.utc)
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="指令下发失败，请检查 C++ 控制程序连接状态",
+            detail=f"指令下发失败：{reason or '请检查 C++ 控制程序连接状态'}",
         )
 
     if req.command_type != "cancel":

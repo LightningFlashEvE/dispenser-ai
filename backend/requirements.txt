@@ -15,7 +15,7 @@ pydantic-settings~=2.7      # 读取 .env 配置
 sqlalchemy~=2.0             # ORM
 aiosqlite~=0.21             # SQLite 异步驱动（配合 SQLAlchemy async）
 
-# ── HTTP 客户端（调用 Ollama、回调 C++）─────────────────────
+# ── HTTP 客户端（调用 llama.cpp server、回调 C++）─────────────────────
 httpx~=0.28
 
 # ── 天平串口通信 ─────────────────────────────────────────────
@@ -28,9 +28,14 @@ jsonschema~=4.23
 opencv-python-headless~=4.10   # 无 GUI，适合 Jetson 部署
 
 # ── 音频处理 ─────────────────────────────────────────────────
-sounddevice~=0.5            # 麦克风采集
+sounddevice~=0.5            # 麦克风采集（可选，前端已走 WebAudio）
 numpy~=1.26                 # 音频数组处理
+
+# ── TTS ─────────────────────────────────────────────────────
+# MeloTTS 独立服务（melotts-git/melo/tts_server.py）承担 TTS，
+# 后端仅通过 HTTP 调用 http://127.0.0.1:8020，不在此安装 TTS 依赖
 
 # ── 工具 ────────────────────────────────────────────────────
 python-dotenv~=1.0          # 加载 .env（开发阶段使用）
 python-multipart~=0.0.20    # FastAPI 文件上传支持
+psutil~=6.1                 # 系统资源监控（CPU/GPU/内存）

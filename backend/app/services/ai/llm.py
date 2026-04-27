@@ -1,197 +1,119 @@
+"""LLM 调用封装 —— llama.cpp server OpenAI 兼容接口。
+
+职责：
+- 调用 /v1/chat/completions（含 streaming 模式）
+- 按 force_json 分别走 intent / dialog 两套温度
+- 解析 JSON 响应
+- 不维护 Session（交由 services/dialog/session.py）
+- 不维护 prompt 模板（交由 services/ai/prompts.py）
+
+新增接口：
+- process_dialog_stream()   — 流式返回 dialog token，供 channels.py 切句后分段 TTS
+- interpret_confirmation()  — 判断用户在 awaiting_confirmation 状态下的意图
+"""
+
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, AsyncIterator, Literal
 
 import httpx
 
 from app.core.config import settings
+from app.services.ai.prompts import (
+    DEFAULT_STATION_SNAPSHOT,
+    build_dialog_system_prompt,
+    build_intent_from_dialog_system_prompt,
+    build_intent_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT_TEMPLATE = """\
-你是一台粉末自动配药设备的操作助手。你的唯一职责是理解操作员的语音指令，并将其转换为结构化 JSON 格式输出。
-
-## 当前工位状态
-{STATION_SNAPSHOT}
-
-## 输出规则
-
-1. 只输出 JSON，不输出任何说明文、代码块标记（```）或换行前缀
-2. JSON 结构严格按照下方格式，不增减字段
-3. 所有质量单位统一转换为毫克（mg）整数：
-   - 用户说"50克" → target_mass_mg: 50000
-   - 用户说"500毫克" → target_mass_mg: 500
-   - 用户说"0.5克" → target_mass_mg: 500
-4. 如果用户提供的信息不足以完成任务，将 is_complete 设为 false，在 missing_slots 中列出缺失项，在 clarification_question 中用简洁中文提问
-5. reagent_hint.raw_text 填写用户说的原始药品描述，guessed_code 和 guessed_name_cn 按你的理解填写，可以为 null
-
-## 意图类型说明
-
-- dispense_powder：称量一种药品放入容器（需要：药品名、质量、目标容器）
-- aliquot_powder：将一种药品分装成 N 等份（需要：药品名、份数、每份质量）
-- mix_powder：多种药品按比例混合（需要：各组分名称和占比、总质量）
-- query_stock：查询库存，无需其他参数
-- query_device_status：查询设备状态，无需其他参数
-- save_formula：保存配方，无需其他参数
-- cancel_task：取消当前任务，无需其他参数
-- emergency_stop：紧急停止，无需其他参数
-- unknown：无法理解用户意图时使用
-
-## 输出 JSON 格式
-
-{{
-  "schema_version": "1.0",
-  "intent_id": "{INTENT_ID}",
-  "intent_type": "<意图类型>",
-  "timestamp": "{TIMESTAMP}",
-  "is_complete": true 或 false,
-  "missing_slots": [],
-  "clarification_question": null 或 "<中文反问>",
-  "reagent_hint": {{
-    "raw_text": "<用户说的药品名>",
-    "guessed_code": "<猜测编码或null>",
-    "guessed_name_cn": "<猜测中文名或null>",
-    "guessed_name_formula": "<猜测化学式或null>"
-  }},
-  "params": {{<见下方各意图的参数结构>}},
-  "raw_asr_text": "{RAW_ASR_TEXT}",
-  "confidence": 0.0~1.0
-}}
-
-## 各意图的 params 结构
-
-dispense_powder:
-  {{ "target_mass_mg": <整数或null>, "tolerance_mg": <整数或null>, "target_vessel": "<容器编号或null>" }}
-
-aliquot_powder:
-  {{ "portions": <整数或null>, "mass_per_portion_mg": <整数或null>, "tolerance_mg": <整数或null>, "target_vessels": [<容器列表>或null] }}
-
-mix_powder:
-  {{
-    "total_mass_mg": <整数或null>,
-    "ratio_type": "mass_fraction" 或 "molar_fraction" 或 null,
-    "components": [ {{ "raw_text": "<组分描述>", "fraction": <0~1的小数或null> }} ],
-    "target_vessel": "<容器编号或null>"
-  }}
-
-query_stock:
-  {{ "raw_text": "<用户描述的药品或null>" }}
-
-其他意图（cancel_task/emergency_stop/query_device_status/save_formula/unknown）:
-  {{}}
-"""
 
 
 @dataclass
 class IntentResult:
-    raw_json: dict[str, Any]
-    is_complete: bool
+    """Intent 阶段结果（force_json=True）。"""
+
+    raw_json: dict[str, Any] | None = None
+    is_complete: bool = True
     clarification_question: str | None = None
     error: str | None = None
 
 
-class DialogSession:
-    def __init__(self):
-        self.messages: list[dict[str, str]] = []
-        self.round_count: int = 0
+@dataclass
+class DialogResult:
+    """Dialog 阶段结果（自然语言）。"""
 
-    def reset(self):
-        self.messages = []
-        self.round_count = 0
-
-    def add_user_message(self, text: str):
-        self.messages.append({"role": "user", "content": text})
-        self.round_count += 1
-
-    def add_assistant_message(self, json_str: str):
-        self.messages.append({"role": "assistant", "content": json_str})
-
-    def is_over_limit(self) -> bool:
-        return self.round_count > settings.dialog_max_rounds
+    text: str = ""
+    error: str | None = None
 
 
 class LLMService:
-    def __init__(self):
+    def __init__(self) -> None:
         self._client = httpx.AsyncClient(
-            base_url=settings.ollama_base_url,
-            timeout=60.0,
+            base_url=settings.llm_base_url,
+            timeout=httpx.Timeout(settings.llm_request_timeout_sec, connect=5.0, read=30.0, write=5.0, pool=30.0),
+            limits=httpx.Limits(
+                max_connections=8,
+                max_keepalive_connections=4,
+                keepalive_expiry=5.0,
+            ),
+            headers={"Authorization": "Bearer none"},
+            trust_env=False,
         )
 
-    def build_system_prompt(
-        self,
-        station_snapshot: str = "工位状态未知（视觉识别暂不可用），请人工确认药品位置。",
-    ) -> str:
-        return SYSTEM_PROMPT_TEMPLATE.format(
-            STATION_SNAPSHOT=station_snapshot,
-            INTENT_ID="",
-            TIMESTAMP="",
-            RAW_ASR_TEXT="",
-        )
+    # ─── 公共入口 ─────────────────────────────────────────────────
 
-    async def process(
+    async def process_intent(
         self,
         user_text: str,
-        session: DialogSession | None = None,
+        intent_history: list[dict[str, str]] | None = None,
         intent_id: str | None = None,
-        station_snapshot: str = "工位状态未知（视觉识别暂不可用），请人工确认药品位置。",
+        station_snapshot: str = DEFAULT_STATION_SNAPSHOT,
     ) -> IntentResult:
+        """意图阶段：强制 JSON 输出。"""
         if intent_id is None:
             intent_id = f"intent_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            STATION_SNAPSHOT=station_snapshot,
-            INTENT_ID=intent_id,
-            TIMESTAMP=timestamp,
-            RAW_ASR_TEXT=user_text,
+        system_prompt = build_intent_system_prompt(
+            intent_id=intent_id,
+            timestamp=timestamp,
+            raw_asr_text=user_text,
+            station_snapshot=station_snapshot,
         )
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-
-        if session and session.messages:
-            messages.extend(session.messages)
-
+        if intent_history:
+            messages.extend(intent_history)
         messages.append({"role": "user", "content": user_text})
 
-        raw_text = await self._call(messages)
+        try:
+            raw_text = await self._call(messages, force_json=True)
+        except httpx.HTTPError as e:
+            logger.error("LLM 意图调用网络错误 [%s]: %s", type(e).__name__, e)
+            return IntentResult(error=f"LLM 服务暂时不可用：{type(e).__name__}")
 
-        if session:
-            session.add_user_message(user_text)
-
-        parsed = self._parse_json(raw_text)
+        parsed = _parse_json(raw_text)
         if parsed is None:
-            retry_text = await self._call(
-                messages
-                + [{"role": "user", "content": "请只输出 JSON，不要其他文字"}]
-            )
-            if session:
-                session.add_user_message("请只输出 JSON，不要其他文字")
-            parsed = self._parse_json(retry_text)
+            logger.warning("LLM 首轮输出无法解析为 JSON，触发一次 retry")
+            retry_messages = messages + [
+                {"role": "assistant", "content": raw_text},
+                {"role": "user", "content": "请只输出合法 JSON，不要任何其他文字或代码块标记"},
+            ]
+            try:
+                retry_text = await self._call(retry_messages, force_json=True)
+            except httpx.HTTPError as e:
+                logger.error("LLM 意图 retry 网络错误 [%s]: %s", type(e).__name__, e)
+                return IntentResult(error=f"LLM 服务暂时不可用：{type(e).__name__}")
+            parsed = _parse_json(retry_text)
             if parsed is None:
-                return IntentResult(
-                    raw_json={
-                        "schema_version": "1.0",
-                        "intent_id": intent_id,
-                        "intent_type": "unknown",
-                        "timestamp": timestamp,
-                        "is_complete": True,
-                        "missing_slots": [],
-                        "clarification_question": None,
-                        "reagent_hint": None,
-                        "params": {},
-                        "raw_asr_text": user_text,
-                        "confidence": 0.0,
-                    },
-                    is_complete=True,
-                    error="LLM 输出无法解析为 JSON",
-                )
-
-        if session:
-            session.add_assistant_message(raw_text)
+                return IntentResult(error="LLM 输出无法解析为 JSON")
 
         return IntentResult(
             raw_json=parsed,
@@ -199,44 +121,297 @@ class LLMService:
             clarification_question=parsed.get("clarification_question"),
         )
 
-    async def _call(self, messages: list[dict[str, str]]) -> str:
-        resp = await self._client.post(
-            "/chat/completions",
-            json={
-                "model": settings.ollama_model,
-                "messages": messages,
-                "stream": False,
-                "format": "json",
-                "options": {
-                    "temperature": 0.1,
-                    "num_predict": 512,
-                },
-                "keep_alive": settings.ollama_keep_alive,
-            },
+    async def process_intent_from_dialog(
+        self,
+        dialog_history: list[dict[str, str]],
+        intent_id: str | None = None,
+        station_snapshot: str = DEFAULT_STATION_SNAPSHOT,
+    ) -> IntentResult:
+        """从对话历史解析意图：强制 JSON 输出。"""
+        if intent_id is None:
+            intent_id = f"intent_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        # 把对话历史格式化为文本
+        history_lines: list[str] = []
+        for msg in dialog_history:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if role == "user":
+                history_lines.append(f"用户：{content}")
+            elif role == "assistant":
+                history_lines.append(f"AI：{content}")
+        dialog_text = "\n".join(history_lines)
+
+        system_prompt = build_intent_from_dialog_system_prompt(
+            intent_id=intent_id,
+            timestamp=timestamp,
+            dialog_history=dialog_text,
+            station_snapshot=station_snapshot,
         )
-        resp.raise_for_status()
-        body = resp.json()
-        try:
-            return body["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as e:
-            logger.error("Ollama 响应格式异常: %s, body=%s", e, body)
-            raise ValueError(f"Ollama 响应格式异常: {e}") from e
 
-    @staticmethod
-    def _parse_json(text: str) -> dict | None:
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("```", 1)[1].split("```", 1)[0].strip()
-            if text.startswith("json"):
-                text = text[4:].strip()
-        try:
-            return json.loads(text)
-        except (json.JSONDecodeError, IndexError):
-            return None
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "请根据以上对话历史，输出用户的最终意图 JSON。"},
+        ]
 
-    async def close(self):
+        try:
+            raw_text = await self._call(messages, force_json=True)
+        except httpx.HTTPError as e:
+            logger.error("LLM 意图调用网络错误 [%s]: %s", type(e).__name__, e)
+            return IntentResult(error=f"LLM 服务暂时不可用：{type(e).__name__}")
+
+        parsed = _parse_json(raw_text)
+        if parsed is None:
+            logger.warning("LLM 首轮输出无法解析为 JSON，触发一次 retry")
+            retry_messages = messages + [
+                {"role": "assistant", "content": raw_text},
+                {"role": "user", "content": "请只输出合法 JSON，不要任何其他文字或代码块标记"},
+            ]
+            try:
+                retry_text = await self._call(retry_messages, force_json=True)
+            except httpx.HTTPError as e:
+                logger.error("LLM 意图 retry 网络错误 [%s]: %s", type(e).__name__, e)
+                return IntentResult(error=f"LLM 服务暂时不可用：{type(e).__name__}")
+            parsed = _parse_json(retry_text)
+            if parsed is None:
+                return IntentResult(error="LLM 输出无法解析为 JSON")
+
+        return IntentResult(
+            raw_json=parsed,
+            is_complete=parsed.get("is_complete", True),
+            clarification_question=parsed.get("clarification_question"),
+        )
+
+    async def process_dialog(
+        self,
+        user_text: str,
+        dialog_history: list[dict[str, str]] | None = None,
+        station_snapshot: str = DEFAULT_STATION_SNAPSHOT,
+    ) -> DialogResult:
+        """对话阶段：自然语言输出（完整返回，非流式）。"""
+        system_prompt = build_dialog_system_prompt(station_snapshot=station_snapshot)
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if dialog_history:
+            messages.extend(dialog_history)
+        messages.append({"role": "user", "content": user_text})
+
+        try:
+            raw_text = await self._call(messages, force_json=False)
+        except httpx.HTTPError as e:
+            logger.error("LLM 对话调用网络错误 [%s]: %s", type(e).__name__, e)
+            return DialogResult(error="LLM 服务暂时不可用，请稍后重试")
+
+        return DialogResult(text=_clean_dialog_text(raw_text))
+
+    async def process_dialog_stream(
+        self,
+        user_text: str,
+        dialog_history: list[dict[str, str]] | None = None,
+        station_snapshot: str = DEFAULT_STATION_SNAPSHOT,
+    ) -> AsyncIterator[str]:
+        """对话阶段流式版：逐 token yield，供调用方切句后分段送 TTS。
+
+        异常时 yield 一个错误提示文本（保证调用方始终能拿到至少一段文字）。
+        """
+        system_prompt = build_dialog_system_prompt(station_snapshot=station_snapshot)
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if dialog_history:
+            messages.extend(dialog_history)
+        messages.append({"role": "user", "content": user_text})
+
+        body: dict[str, Any] = {
+            "messages": messages,
+            "stream": True,
+            "temperature": settings.llm_dialog_temperature,
+            "max_tokens": settings.llm_max_tokens,
+        }
+
+        _t0 = time.time()
+        try:
+            async for token in self._call_stream_tokens("/chat/completions", body):
+                yield _clean_token(token)
+        except httpx.HTTPError as e:
+            logger.error("LLM dialog stream 网络错误 [%s]: %s", type(e).__name__, e)
+            yield "抱歉，服务暂时不可用，请稍后重试。"
+            return
+        except Exception as e:
+            logger.exception("LLM dialog stream 未知异常: %s", e)
+            yield "抱歉，处理时出现错误，请重试。"
+            return
+
+        logger.info("LLM process_dialog_stream ok elapsed=%.1fs", time.time() - _t0)
+
+    async def interpret_confirmation(
+        self,
+        user_text: str,
+        pending_summary: str,
+    ) -> Literal["confirm", "cancel", "modify", "unrelated"]:
+        """判断用户在 awaiting_confirmation 状态下的意图。
+
+        返回值语义：
+        - confirm   — 同意执行当前 pending_action
+        - cancel    — 拒绝/取消
+        - modify    — 想修改参数（重新进入对话）
+        - unrelated — 与确认无关（继续普通对话）
+        """
+        prompt = (
+            f"你是配药助手。系统正在等待用户确认以下操作：\n{pending_summary}\n\n"
+            f"用户说：\"{user_text}\"\n\n"
+            "请只输出一个词（不带任何标点或额外说明）：\n"
+            "- confirm  （用户同意执行）\n"
+            "- cancel   （用户拒绝/取消）\n"
+            "- modify   （用户想修改参数）\n"
+            "- unrelated（与确认无关）"
+        )
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        body: dict[str, Any] = {
+            "messages": messages,
+            "stream": True,
+            "temperature": 0.0,
+            "max_tokens": 16,
+        }
+        try:
+            result = await self._call_stream("/chat/completions", body)
+            t = result.strip().lower()
+            if "confirm" in t:
+                return "confirm"
+            if "cancel" in t:
+                return "cancel"
+            if "modify" in t:
+                return "modify"
+            return "unrelated"
+        except Exception as e:
+            logger.warning("interpret_confirmation 调用异常: %s — 保守回退 unrelated", e)
+            return "unrelated"
+
+    # ─── 底层调用 ─────────────────────────────────────────────────
+
+    async def _call(self, messages: list[dict[str, str]], *, force_json: bool) -> str:
+        """统一走 stream 模式，复用全局 httpx.AsyncClient。"""
+        body: dict[str, Any] = {
+            "messages": messages,
+            "stream": True,
+            "temperature": (
+                settings.llm_intent_temperature if force_json else settings.llm_dialog_temperature
+            ),
+            "max_tokens": settings.llm_max_tokens,
+        }
+        if force_json:
+            body["response_format"] = {"type": "json_object"}
+
+        _t0 = time.time()
+        content = await self._call_stream("/chat/completions", body)
+        est_tokens = max(1, int(len(content) / 2.5))
+        logger.info(
+            "LLM _call ok force_json=%s elapsed=%.1fs content_len=%d est_tokens=%d",
+            force_json, time.time() - _t0, len(content), est_tokens,
+        )
+        return content
+
+    async def _call_stream(self, path: str, body: dict[str, Any]) -> str:
+        """流式读取 SSE 响应，累积 delta.content 并返回完整内容。"""
+        async with self._client.stream("POST", path, json=body) as resp:
+            resp.raise_for_status()
+            full_content = ""
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                delta = (
+                    chunk.get("choices", [{}])[0]
+                    .get("delta", {})
+                    .get("content", "")
+                )
+                if delta:
+                    full_content += delta
+            return full_content
+
+    async def _call_stream_tokens(
+        self, path: str, body: dict[str, Any]
+    ) -> AsyncIterator[str]:
+        """流式读取 SSE 响应，逐 token yield delta.content。"""
+        async with self._client.stream("POST", path, json=body) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    return
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                delta = (
+                    chunk.get("choices", [{}])[0]
+                    .get("delta", {})
+                    .get("content", "")
+                )
+                if delta:
+                    yield delta
+
+    async def close(self) -> None:
         await self._client.aclose()
 
+
+def _clean_token(token: str) -> str:
+    return token
+
+
+def _parse_json(text: str) -> dict | None:
+    """容错解析，兼容偶尔出现的 ```json``` 代码块。"""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("```", 1)[1]
+        if t.startswith("json"):
+            t = t[4:]
+        t = t.split("```", 1)[0].strip()
+    try:
+        data = json.loads(t)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        start, end = t.find("{"), t.rfind("}")
+        if start != -1 and end > start:
+            try:
+                data = json.loads(t[start : end + 1])
+                return data if isinstance(data, dict) else None
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
+def _clean_dialog_text(text: str) -> str:
+    import re
+    if not text:
+        return ""
+    lines: list[str] = []
+    for raw in text.strip().split("\n"):
+        stripped = raw.strip()
+        if re.match(r"^-?\d+$", stripped):
+            continue
+        if re.match(r"^-?\d+[a-z]", stripped) and len(stripped) < 20:
+            continue
+        if ".ggml" in stripped or ".bin" in stripped:
+            continue
+        lines.append(raw)
+    result = "\n".join(lines).strip()
+    return result or text.strip()
+
+
+# ─── 单例 ─────────────────────────────────────────────────────────
 
 _llm_instance: LLMService | None = None
 _llm_lock: asyncio.Lock | None = None
@@ -264,3 +439,13 @@ def get_llm() -> LLMService:
     if _llm_instance is None:
         _llm_instance = LLMService()
     return _llm_instance
+
+
+__all__ = [
+    "LLMService",
+    "IntentResult",
+    "DialogResult",
+    "get_llm",
+    "get_llm_async",
+    "_clean_dialog_text",
+]

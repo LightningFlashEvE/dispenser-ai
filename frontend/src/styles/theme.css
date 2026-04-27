@@ -1,0 +1,121 @@
+:root {
+  /* 
+   * Webflow Design System Inspiration 
+   * Primary Colors
+   */
+  --wf-black: #080808;
+  --wf-white: #ffffff;
+  --wf-blue: #146ef5;
+  --wf-blue-400: #3b89ff;
+  --wf-blue-300: #006acc;
+  --wf-blue-hover: #0055d4;
+
+  /* Secondary Accents */
+  --wf-purple: #7a3dff;
+  --wf-pink: #ed52cb;
+  --wf-green: #00d722;
+  --wf-orange: #ff6b00;
+  --wf-yellow: #ffae13;
+  --wf-red: #ee1d36;
+
+  /* Neutrals */
+  --wf-gray-800: #222222;
+  --wf-gray-700: #363636;
+  --wf-gray-300: #ababab;
+  --wf-gray-mid: #5a5a5a;
+  --wf-border: #d8d8d8;
+  --wf-border-hover: #898989;
+
+  /* Semantic Dark Mode Variables */
+  --wf-bg-page: #080808;
+  --wf-bg-card: #141414;
+  --wf-bg-panel: #1f1f1f;
+  --wf-border-dark: #2e2e2e;
+  --wf-text-main: #f5f5f5;
+  --wf-text-muted: #9e9e9e;
+
+  /* Shadows */
+  --wf-shadow-cascade: rgba(0,0,0,0) 0px 84px 24px, 
+                       rgba(0,0,0,0.01) 0px 54px 22px, 
+                       rgba(0,0,0,0.04) 0px 30px 18px, 
+                       rgba(0,0,0,0.08) 0px 13px 13px, 
+                       rgba(0,0,0,0.09) 0px 3px 7px;
+
+  /* Typography */
+  --wf-font-family: 'WF Visual Sans Variable', 'Inter', system-ui, -apple-system, Arial, sans-serif;
+  --wf-font-mono: 'Inconsolata', monospace;
+
+  /* Override Element Plus Variables */
+  --el-color-primary: var(--wf-blue);
+  --el-color-primary-light-3: var(--wf-blue-400);
+  --el-color-primary-dark-2: var(--wf-blue-hover);
+  --el-color-success: var(--wf-green);
+  --el-color-warning: var(--wf-orange);
+  --el-color-danger: var(--wf-red);
+  --el-color-info: var(--wf-gray-mid);
+
+  --el-text-color-primary: var(--wf-text-main);
+  --el-text-color-regular: var(--wf-text-main);
+  --el-text-color-secondary: var(--wf-text-muted);
+  --el-text-color-placeholder: var(--wf-text-muted);
+
+  --el-border-color: var(--wf-border-dark);
+  --el-border-color-hover: #4a4a4a;
+  --el-border-radius-base: 4px;
+  --el-border-radius-small: 2px;
+  --el-border-radius-round: 8px;
+  
+  /* Element Plus Dark Theme Overrides */
+  --el-bg-color: var(--wf-bg-card);
+  --el-bg-color-overlay: var(--wf-bg-panel);
+  --el-fill-color-blank: var(--wf-bg-page);
+  --el-fill-color: var(--wf-bg-panel);
+  --el-fill-color-light: var(--wf-bg-panel);
+
+  --el-font-family: var(--wf-font-family);
+  --el-box-shadow-light: 0 3px 7px rgba(0,0,0,0.5);
+}
+
+body {
+  font-family: var(--wf-font-family);
+  background: var(--wf-bg-page);
+  color: var(--wf-text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Base button override to include translation hover if it's an el-button */
+.el-button {
+  transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+.el-button:not(.is-disabled):hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Badge variants globally available */
+.badge-solid {
+  background-color: var(--wf-blue);
+  color: var(--wf-white);
+  border-radius: 4px;
+  font-weight: 550;
+  padding: 2px 8px;
+  font-size: 12.8px;
+  text-transform: uppercase;
+}
+
+.badge-tint {
+  background-color: rgba(20, 110, 245, 0.1);
+  color: var(--wf-blue);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12.8px;
+  font-weight: 550;
+}
+
+/* Generic card container shadow */
+.wf-card {
+  background: var(--wf-bg-card);
+  border: 1px solid var(--wf-border-dark);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}

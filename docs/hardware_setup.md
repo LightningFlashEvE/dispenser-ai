@@ -20,7 +20,7 @@
 |------|------|
 | OS | Windows(x86_64) |
 | 用途 | 核心业务逻辑开发（规则引擎、状态机、REST API、WebSocket、前端） |
-| Ollama | Windows 桌面版 |
+| llama.cpp server | 编译 ARM64 版本，Qwen3-4B-Instruct-2507-Q4_K_M |
 | mock-qt | FastAPI 模拟 C++ 控制程序 |
 
 ### 跨平台开发须知
@@ -40,11 +40,11 @@
 | 组件 | 内存占用 |
 |------|---------|
 | OS + UI | ~2GB |
-| Ollama + 7B 模型 | ~4-6GB |
-| whisper.cpp | ~1-2GB |
-| MeloTTS | ~500MB-1GB |
+| llama.cpp server + Qwen3-4B-Instruct-2507-Q4_K_M | ~2.5-3GB |
+| whisper.cpp (small, CUDA) | ~1-1.5GB |
+| MeloTTS (CUDA) | ~500MB-1GB |
 | FastAPI + 数据库 | ~500MB |
-| **总计** | **~8-12GB** |
+| **总计** | **~6-9GB** |
 
 ### `config.py` 跨平台设计原则
 
@@ -195,6 +195,18 @@ PY
 6. 完成规则引擎、状态机与控制白名单配置
 7. 进行联调与长稳测试
 
+### 4.5 代理配置（必做）
+
+若系统设置了 HTTP 代理（如 `http_proxy=http://127.0.0.1:7890`），本地服务通信会被代理拦截导致连接失败。
+
+**解决方案：在 `~/.bashrc` 中添加：**
+
+```bash
+export no_proxy="localhost,127.0.0.1,192.168.10.*"
+```
+
+配置后执行 `source ~/.bashrc` 生效。此配置确保所有本地和局域网请求绕过代理。
+
 ---
 
 ## 5. 模型与运行组件
@@ -265,3 +277,4 @@ PY
 | 二维码识别不稳 | 检查 ROI、补光、对焦和标定结果 |
 | 控制下发失败 | 检查后级控制程序地址、CAN/RS485/串口配置和日志 |
 | 长稳异常 | 检查守护进程、日志滚动和供电稳定性 |
+| 前端连接后端失败 | 检查系统代理设置；确认 `no_proxy` 包含 `localhost,127.0.0.1`；检查 Vite proxy 配置 |

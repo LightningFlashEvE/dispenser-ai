@@ -61,7 +61,7 @@
 │                         Jetson 主控：FastAPI 后端                           │
 │                                                                            │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ AI 处理层：VAD → whisper.cpp(ASR) → Ollama(LLM) → MeloTTS(TTS)      │ │
+│  │  AI 处理层：VAD → whisper.cpp(ASR) → llama.cpp server(LLM) → MeloTTS(TTS)  │ │
 │  │   intent_schema.json(LLM输出) → 规则引擎 → command_schema.json(下发) │ │
 │  └───────────────────────────────────────┬───────────────────────────────┘ │
 │                                          │                                 │
@@ -138,7 +138,7 @@
 ### 7.1 语音链路
 - silero-vad：语音起止检测
 - whisper.cpp：中文离线识别
-- 本地 LLM（Ollama 部署，`OLLAMA_KEEP_ALIVE=0`）：意图理解、槽位补全、生成 `intent_json`（格式见 `shared/intent_schema.json`）
+- 本地 LLM（llama.cpp server，Qwen3-4B-Instruct-2507-Q4_K_M）：意图理解、槽位补全、生成 `intent_json`（格式见 `shared/intent_schema.json`）
 - 规则引擎：校验 intent_json，查库补全药品字段，生成 `command JSON`（格式见 `shared/command_schema.json`）
 - MeloTTS：语音反馈和反问播报
 
@@ -175,7 +175,7 @@
 | 常驻 | 控制适配层 | 规则引擎、状态机、协议适配 |
 | 懒加载 | ASR（whisper.cpp） | 按需启动，语音识别完成后释放 |
 | 懒加载 | TTS（MeloTTS） | 按需启动，播报完成后释放 |
-| 半常驻 | LLM（Ollama） | 推理期间独占 GPU，`OLLAMA_KEEP_ALIVE=0` 推理后立即释放 |
+| 常驻 | LLM（llama.cpp server） | 常驻运行于 8080 端口，GPU 全层推理 |
 
 #### 优先级定义（高 → 低）
 

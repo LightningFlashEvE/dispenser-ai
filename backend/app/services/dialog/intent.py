@@ -1,35 +1,67 @@
+"""Intent 校验：jsonschema Draft-07 + 业务规则检查。
+
+两层校验：
+1. Schema 层：`intent_schema.json` 的 Draft-07 校验（字段类型、enum、范围等）
+2. 业务层：槽位完整性、质量上限、混合比例和等业务约束
+
+注意：INTENT_TYPES / SLOT_RULES 与 shared/intent_schema.json 保持一致。
+"""
+
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft7Validator
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-INTENT_TYPES = {
-    "dispense_powder",
-    "aliquot_powder",
-    "mix_powder",
+
+INTENT_TYPES: set[str] = {
+    "dispense",
+    "aliquot",
+    "mix",
+    "formula",
     "query_stock",
-    "query_device_status",
-    "save_formula",
+    "device_status",
     "restock",
-    "cancel_task",
+    "cancel",
     "emergency_stop",
     "unknown",
 }
 
-SLOT_RULES = {
-    "dispense_powder": {
-        "required_slots": ["reagent_hint.raw_text", "params.target_mass_mg", "params.target_vessel"],
+# 这些 intent_type 不需要槽位补全，直接通过校验
+INTENT_TYPES_NO_SLOTS: set[str] = {
+    "query_stock",
+    "device_status",
+    "formula",
+    "cancel",
+    "emergency_stop",
+    "unknown",
+}
+
+SLOT_RULES: dict[str, dict[str, list[str]]] = {
+    "dispense": {
+        "required_slots": [
+            "reagent_hint.raw_text",
+            "params.target_mass_mg",
+            "params.target_vessel",
+        ],
         "optional_slots": ["params.tolerance_mg"],
     },
-    "aliquot_powder": {
-        "required_slots": ["reagent_hint.raw_text", "params.portions", "params.mass_per_portion_mg"],
+    "aliquot": {
+        "required_slots": [
+            "reagent_hint.raw_text",
+            "params.portions",
+            "params.mass_per_portion_mg",
+        ],
         "optional_slots": ["params.tolerance_mg", "params.target_vessels"],
     },
-    "mix_powder": {
+    "mix": {
         "required_slots": ["params.total_mass_mg", "params.components"],
         "optional_slots": ["params.ratio_type", "params.target_vessel"],
     },
@@ -37,7 +69,7 @@ SLOT_RULES = {
         "required_slots": [],
         "optional_slots": ["reagent_hint.raw_text"],
     },
-    "save_formula": {
+    "formula": {
         "required_slots": [],
         "optional_slots": [],
     },
@@ -48,9 +80,45 @@ SLOT_RULES = {
 }
 
 
+# ─── Schema 层（jsonschema Draft-07） ─────────────────────────────
+
+_schema_validator: Draft7Validator | None = None
+
+
+def load_intent_schema() -> dict:
+    path = Path(settings.intent_schema_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"intent_schema.json 不存在: {path}")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or "properties" not in data:
+        raise ValueError(f"intent_schema.json 格式无效: {path}")
+    return data
+
+
+def get_intent_validator() -> Draft7Validator:
+    global _schema_validator
+    if _schema_validator is None:
+        schema = load_intent_schema()
+        _schema_validator = Draft7Validator(schema)
+    return _schema_validator
+
+
+def validate_intent_schema(intent_data: dict) -> list[str]:
+    """纯 Schema 校验，返回人类可读错误列表（空列表=通过）。"""
+    validator = get_intent_validator()
+    errors: list[str] = []
+    for err in sorted(validator.iter_errors(intent_data), key=lambda e: list(e.path)):
+        path = ".".join(str(p) for p in err.absolute_path) or "<root>"
+        errors.append(f"{path}: {err.message}")
+    return errors
+
+
+# ─── 业务层 ───────────────────────────────────────────────────────
+
 def _get_nested(data: dict, path: str) -> Any:
     parts = path.split(".")
-    current = data
+    current: Any = data
     for part in parts:
         if not isinstance(current, dict):
             return None
@@ -60,20 +128,33 @@ def _get_nested(data: dict, path: str) -> Any:
     return current
 
 
-def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
-    """校验 LLM 输出的 intent_json 结构。
+def validate_intent(
+    intent_data: dict,
+    *,
+    strict_schema: bool = True,
+) -> tuple[bool, list[str], str | None]:
+    """校验 LLM 输出的 intent_json。
+
+    Args:
+        intent_data: LLM 输出的 dict
+        strict_schema: 是否启用 Draft-07 Schema 校验（默认 True）
 
     Returns:
         (is_valid, errors, clarification_question)
     """
     errors: list[str] = []
 
+    if strict_schema:
+        schema_errors = validate_intent_schema(intent_data)
+        if schema_errors:
+            return False, schema_errors, None
+
     intent_type = intent_data.get("intent_type")
     if intent_type not in INTENT_TYPES:
         errors.append(f"intent_type '{intent_type}' 不在允许的枚举中")
         return False, errors, None
 
-    if intent_type in ("query_stock", "query_device_status", "save_formula", "cancel_task", "emergency_stop", "unknown"):
+    if intent_type in INTENT_TYPES_NO_SLOTS:
         return True, [], None
 
     rules = SLOT_RULES.get(intent_type)
@@ -95,8 +176,8 @@ def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
         if value is None:
             errors.append(f"必填槽位 {slot} 为空")
 
-    params = intent_data.get("params", {})
-    if intent_type == "mix_powder":
+    params = intent_data.get("params", {}) or {}
+    if intent_type == "mix":
         components = params.get("components")
         if components and isinstance(components, list):
             fractions = [
@@ -105,22 +186,28 @@ def validate_intent(intent_data: dict) -> tuple[bool, list[str], str | None]:
             if fractions and abs(sum(fractions) - 1.0) > 0.02:
                 errors.append(f"组分 fraction 之和 {sum(fractions):.4f} ≠ 1.0")
 
-    target_mass = params.get("target_mass_mg") or params.get("mass_per_portion_mg") or params.get("total_mass_mg")
+    target_mass = (
+        params.get("target_mass_mg")
+        or params.get("mass_per_portion_mg")
+        or params.get("total_mass_mg")
+    )
     if target_mass is not None:
         if not isinstance(target_mass, int) or target_mass <= 0:
             errors.append(f"质量必须为正整数 mg，得到 {target_mass}")
         elif target_mass > settings.balance_max_mass_mg:
-            errors.append(f"目标质量 {target_mass} mg 超过量程 {settings.balance_max_mass_mg} mg")
+            errors.append(
+                f"目标质量 {target_mass} mg 超过量程 {settings.balance_max_mass_mg} mg"
+            )
 
     return len(errors) == 0, errors, None
 
 
-def load_intent_schema() -> dict:
-    path = Path(settings.intent_schema_path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(f"intent_schema.json 不存在: {path}")
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict) or "properties" not in data:
-        raise ValueError(f"intent_schema.json 格式无效: {path}")
-    return data
+__all__ = [
+    "INTENT_TYPES",
+    "INTENT_TYPES_NO_SLOTS",
+    "SLOT_RULES",
+    "validate_intent",
+    "validate_intent_schema",
+    "load_intent_schema",
+    "get_intent_validator",
+]
