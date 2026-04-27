@@ -43,7 +43,7 @@ usage() {
 
 check_prerequisites() {
     if [ ! -f "${SERVER_BIN}" ]; then
-        echo "错误: llama-server 未编译，请先运行: cd llama.cpp && mkdir build && cd build && cmake .. -DLLAMA_CUDA=ON && make -j4 llama-server"
+        echo "错误: llama-server 未编译，请先运行: cd llama.cpp && cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87 && cmake --build build --target llama-server -j\$(nproc)"
         exit 1
     fi
 

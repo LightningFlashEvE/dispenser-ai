@@ -1,5 +1,13 @@
 * text=auto
 
+*.sh text eol=lf
+llama_server.sh text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
 # Large runtime assets are intentionally not stored in this repository.
 *.gguf binary
 *.bin binary

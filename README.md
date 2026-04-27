@@ -189,67 +189,139 @@ git clone <你的仓库地址> ~/dispenser-ai
 
 ### 步骤 2：安装系统级依赖
 
+推荐直接执行项目脚本：
+
+```bash
+cd ~/dispenser-ai
+chmod +x scripts/*.sh llama_server.sh
+./scripts/setup-nx.sh
+```
+
+脚本会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv、MCP venv 和前端依赖。等价的核心命令如下：
+
 ```bash
 sudo apt update && sudo apt upgrade -y
 
 sudo apt install -y \
-    python3.11 python3.11-venv python3-pip \
-    nodejs npm sqlite3 \
-    git curl wget ffmpeg v4l-utils alsa-utils \
-    libopencv-dev pkg-config
+    ca-certificates curl wget git git-lfs \
+    build-essential cmake ninja-build pkg-config \
+    python3 python3-venv python3-dev python3-pip \
+    sqlite3 ffmpeg v4l-utils alsa-utils portaudio19-dev \
+    libopencv-dev libopenblas-dev libsndfile1 \
+    nginx net-tools
+
+# Ubuntu 22.04 apt 源里的 Node 版本偏旧，Vite 5 建议 Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
 ### 步骤 3：安装 Python 依赖（后端）
 
 ```bash
 cd ~/dispenser-ai/backend
-python3.11 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
+python -m pip install --upgrade pip wheel setuptools
 pip install -r requirements.txt
 ```
 
-### 步骤 4：编译 llama.cpp 并启动 server
+安装 MCP Server 依赖：
+
+```bash
+cd ~/dispenser-ai/mcp-server
+python3 -m venv venv
+./venv/bin/python -m pip install --upgrade pip wheel setuptools
+./venv/bin/pip install -r requirements.txt
+```
+
+安装前端依赖：
+
+```bash
+cd ~/dispenser-ai/frontend
+npm install
+```
+
+### 步骤 4：下载模型资产
 
 ```bash
 cd ~/dispenser-ai
 
-# 已有编译的跳过，否则执行：
-# git clone https://github.com/ggerganov/llama.cpp.git
-# cd llama.cpp && mkdir build && cd build
-# cmake .. -DLLAMA_CUDA=ON -DLLAMA_BUILD_SERVER=ON -DCMAKE_CUDA_ARCHITECTURES=87-real
-# make -j$(nproc) llama-server
+# Qwen 模型需要先配置实际下载地址；可用 Hugging Face、ModelScope、对象存储或内网镜像。
+export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 的下载地址>"
+
+# 默认下载 whisper base；如要 small，增加 DOWNLOAD_WHISPER_SMALL=1
+DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
+```
+
+确认模型路径与 `backend/.env` 一致：
+
+```env
+LLM_MODEL_PATH=models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+WHISPER_CPP_MODEL_PATH=models/whisper/ggml-small.bin
+```
+
+### 步骤 5：编译 llama.cpp 并启动 server
+
+```bash
+cd ~/dispenser-ai
+
+git clone https://github.com/ggml-org/llama.cpp.git
+cd llama.cpp
+cmake -B build \
+  -DGGML_CUDA=ON \
+  -DCMAKE_CUDA_ARCHITECTURES=87 \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target llama-server -j$(nproc)
 
 # 启动 LLM 服务（后台运行）
+cd ~/dispenser-ai
 ./llama_server.sh start
 ```
 
-### 步骤 5：编译 whisper.cpp（ARM64）
+> Orin NX GPU 架构为 Ampere，CUDA architecture 使用 `87`。新版 llama.cpp 使用 `DGGML_CUDA=ON`，不要再用旧参数 `DLLAMA_CUDA=ON`。
+
+### 步骤 6：编译 whisper.cpp（ARM64/CUDA）
 
 ```bash
-cd ~
+cd ~/dispenser-ai
 git clone https://github.com/ggml-org/whisper.cpp.git
 cd whisper.cpp
-cmake -B build -DWHISPER_BUILD_EXAMPLES=OFF
-cmake --build build --config Release -j$(nproc)
+cmake -B build \
+  -DGGML_CUDA=ON \
+  -DWHISPER_BUILD_TESTS=OFF \
+  -DCMAKE_CUDA_ARCHITECTURES=87 \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target whisper-server -j$(nproc)
 
-# 下载语音模型（small 或 medium）
-wget -O models/ggml-small.bin https://huggingface.co/ggml-org/whisper.cpp/resolve/main/ggml-model-whisper-small.bin
-
-# 记住可执行文件和模型路径，后面配置要用：
-# 可执行文件: ~/whisper.cpp/build/bin/main
-# 模型文件:   ~/whisper.cpp/models/ggml-small.bin
+# 启动 ASR HTTP 服务
+cd ~/dispenser-ai
+./scripts/start-whisper-server.sh start
 ```
 
-### 步骤 6：安装 MeloTTS
+### 步骤 7：安装 MeloTTS
 
 ```bash
-pip install MeloTTS
+cd ~/dispenser-ai
+git clone https://github.com/myshell-ai/MeloTTS.git melotts-git
+cd melotts-git
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip wheel setuptools
+pip install -e .
 
-# 下载模型（首次运行会自动下载，也可手动指定路径）
+# 首次初始化中文 TTS 资源
 python3 -c "from melo.api import TTS; model = TTS(language='ZH')"
 ```
 
-### 步骤 7：配置环境变量
+当前启动脚本会调用：
+
+```bash
+~/dispenser-ai/melotts-git/venv/bin/python ~/dispenser-ai/melotts-git/melo/tts_server.py --port 8020
+```
+
+如果你使用的是原版 MeloTTS 且没有 `melo/tts_server.py`，需要放入项目的 MeloTTS HTTP 服务封装，或改用后端支持的其他 TTS 服务地址。
+
+### 步骤 8：配置环境变量
 
 ```bash
 cd ~/dispenser-ai/backend
@@ -270,7 +342,7 @@ nano .env
 | `ENV` | 改为 `production` | - |
 | `SKIP_CONFIRMATION` | 生产必须 `false` | - |
 
-### 步骤 8：确认硬件设备
+### 步骤 9：确认硬件设备
 
 ```bash
 # 天平串口
@@ -284,17 +356,16 @@ arecord -l
 python3 -c "import sounddevice as sd; print(sd.query_devices())"
 ```
 
-### 步骤 9：启动后端服务
+### 步骤 10：启动服务
 
 ```bash
-cd ~/dispenser-ai/backend
-source venv/bin/activate
-python main.py
+cd ~/dispenser-ai
+./scripts/start-all.sh --prod
 ```
 
-启动成功后，默认监听 `http://0.0.0.0:8000`，可通过浏览器或工业触摸屏访问。
+后端默认监听 `http://0.0.0.0:8000`。生产模式会跳过 `mock-qt` 和 Vite dev server，并构建前端 `frontend/dist/`。
 
-### 步骤 10（可选）：配置开机自启（systemd）
+### 步骤 11（可选）：配置开机自启（systemd）
 
 创建 systemd 服务文件：
 
@@ -314,7 +385,7 @@ Type=simple
 User=<你的用户名>
 WorkingDirectory=/home/<你的用户名>/dispenser-ai/backend
 Environment="PATH=/home/<你的用户名>/dispenser-ai/backend/venv/bin"
-ExecStart=/home/<你的用户名>/dispenser-ai/backend/venv/bin/python main.py
+ExecStart=/home/<你的用户名>/dispenser-ai/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 
@@ -384,7 +455,7 @@ AI: "已开始执行，预计 2 分钟完成"
 cd mcp-server
 
 # 安装依赖（首次运行）
-python3.11 -m venv venv
+python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 
 # 复制环境变量

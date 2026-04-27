@@ -141,7 +141,7 @@ if [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null; the
 else
     BACKEND_UVICORN="${SCRIPT_DIR}/backend/venv/bin/uvicorn"
     if [ ! -x "${BACKEND_UVICORN}" ]; then
-        err "backend venv 不存在，请先运行: cd backend && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+        err "backend venv 不存在，请先运行: ./scripts/setup-nx.sh"
         err "无法启动 backend，后续服务跳过"
     else
         # 切换到 backend/ 目录，用 setsid 隔离 session 防止信号干扰
@@ -170,7 +170,7 @@ else
         # 尝试创建 venv 并安装依赖
         if [ -d "${SCRIPT_DIR}/mcp-server" ] && [ -f "${SCRIPT_DIR}/mcp-server/requirements.txt" ]; then
             info "mcp-server venv 不存在，正在创建..."
-            python3.11 -m venv "${SCRIPT_DIR}/mcp-server/venv" 2>/dev/null || warn "创建 mcp-server venv 失败"
+            python3 -m venv "${SCRIPT_DIR}/mcp-server/venv" 2>/dev/null || warn "创建 mcp-server venv 失败"
             if [ -x "${SCRIPT_DIR}/mcp-server/venv/bin/pip" ]; then
                 "${SCRIPT_DIR}/mcp-server/venv/bin/pip" install -q -r "${SCRIPT_DIR}/mcp-server/requirements.txt" 2>/dev/null || warn "安装 mcp-server 依赖失败"
                 MCP_PY="${SCRIPT_DIR}/mcp-server/venv/bin/python"

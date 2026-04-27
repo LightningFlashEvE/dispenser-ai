@@ -4,7 +4,7 @@
     "path": "models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
     "server_url": "http://localhost:8080/v1",
     "distribution": "external",
-    "notes": "Large GGUF files are not committed to Git. Use scripts/download-models.sh or scripts/download-models.ps1 after cloning."
+    "notes": "Large GGUF files are not committed to Git. Set QWEN_GGUF_URL and use scripts/download-models.sh or scripts/download-models.ps1 after cloning."
   },
   "asr": {
     "default_model": "ggml-base.bin",

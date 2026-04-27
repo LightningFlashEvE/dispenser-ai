@@ -50,7 +50,7 @@ do_start() {
         echo "错误: 未找到 whisper-server 可执行文件"
         echo "  请先编译（whisper.cpp HTTP server 示例）："
         echo "    cd whisper.cpp"
-        echo "    cmake -B build -DWHISPER_BUILD_TESTS=OFF"
+        echo "    cmake -B build -DGGML_CUDA=ON -DWHISPER_BUILD_TESTS=OFF -DCMAKE_CUDA_ARCHITECTURES=87"
         echo "    cmake --build build --target whisper-server --config Release -j\$(nproc)"
         echo "  编译后可执行文件在: whisper.cpp/build/bin/whisper-server"
         exit 1
