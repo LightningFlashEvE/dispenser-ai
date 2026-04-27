@@ -21,7 +21,7 @@
 
 | 组件 | 说明 |
 |------|------|
-| Python 3.11+ | 主语言 |
+| Python 3.x | 主语言；JetPack 6.x 默认使用系统 `python3` 创建 venv，不强依赖 `python3.11` 包名 |
 | FastAPI | 本地 API 与 WebSocket 服务 |
 | Pydantic v2 | 输入输出校验 |
 | SQLite + JSON | 本地数据存储 |
@@ -141,7 +141,7 @@ pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 ```env
 # ASR (whisper-server HTTP 服务)
 WHISPER_SERVER_URL=http://127.0.0.1:8081
-WHISPER_CPP_MODEL_PATH=models/whisper/ggml-base.bin
+WHISPER_CPP_MODEL_PATH=models/whisper/ggml-small.bin
 WHISPER_LANGUAGE=zh
 WHISPER_VAD_THRESHOLD=0.5
 AUDIO_SAMPLE_RATE=16000

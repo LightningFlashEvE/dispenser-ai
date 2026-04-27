@@ -20,7 +20,7 @@
 | `mcp-server/` | MCP Server，将系统能力封装为 AI 可调用的工具 | 见下方 MCP Server 说明 |
 | `shared/` | Schema 契约文件（intent_schema.json + command_schema.json） | 见下方 Schema 说明 |
 | `mock-qt/` | 模拟 C++ 后级控制程序，用于开发联调 | [mock-qt/AGENTS.md](mock-qt/AGENTS.md) |
-| `libs/` | 项目级共享库目录（llama.cpp / whisper.cpp 编译产物 `.so`） | 便于整机迁移，无需目标机重新编译 |
+| `libs/` | 可选本机二进制资产目录（llama.cpp / whisper.cpp 编译产物 `.so`） | 不进 Git；目标机优先本地编译，必要时从 Release/对象存储下载 |
 | `docs/` | 架构/协议/硬件文档 | 见下方文档索引 |
 
 ---
@@ -47,6 +47,7 @@
 | [docs/hardware_setup.md](docs/hardware_setup.md) | 硬件选型（含天平 WKC204C）、部署、运维与排障 |
 | [docs/llm_prompt_design.md](docs/llm_prompt_design.md) | LLM system prompt 模板、工位快照注入、对话历史格式、典型场景示例、后端实现要点 |
 | [docs/upgrade-v0.2.md](docs/upgrade-v0.2.md) | v0.2 重构升级手册（破坏性变更说明、Jetson 升级步骤、验收清单、回滚方案） |
+| [docs/assets.md](docs/assets.md) | 大模型、编译产物、venv、数据库等不进 Git 资产的分发与恢复说明 |
 
 ---
 
@@ -183,7 +184,7 @@ C++ 后级控制程序（TCP + JSON）
 ```env
 # ASR (whisper-server HTTP 服务)
 WHISPER_SERVER_URL=http://127.0.0.1:8081
-WHISPER_CPP_MODEL_PATH=models/whisper/ggml-base.bin
+WHISPER_CPP_MODEL_PATH=models/whisper/ggml-small.bin
 WHISPER_LANGUAGE=zh
 WHISPER_VAD_THRESHOLD=0.5
 AUDIO_SAMPLE_RATE=16000
@@ -281,6 +282,15 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 ### 一键启动（推荐）
 
 ```bash
+# Jetson Orin NX 首次部署：安装系统依赖、创建 venv、安装前端依赖
+./scripts/setup-nx.sh
+
+# 下载外部模型资产；Qwen 需先配置实际下载地址
+export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
+DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
+```
+
+```bash
 # 开发模式：启动全部（含 mock-qt + Vite dev server）
 ./scripts/start-all.sh
 
@@ -310,7 +320,7 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 |------|------|------|---------|------|
 | 1 | whisper-server | 8081 | `./scripts/start-whisper-server.sh start` | ASR，无依赖 |
 | 2 | llama-server   | 8080 | `./llama_server.sh start` | LLM，GPU 加载约 30-60 秒 |
-| 3 | MeloTTS        | 8020 | `backend/venv/bin/python melotts-git/melo/tts_server.py --port 8020` | TTS |
+| 3 | MeloTTS        | 8020 | `melotts-git/venv/bin/python melotts-git/melo/tts_server.py --port 8020` | TTS |
 | 4 | mock-qt        | 9000 | `mock-qt/venv/bin/python mock-qt/server.py --port 9000` | 后级控制模拟（仅开发）|
 | 5 | backend        | 8000 | `backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend` | FastAPI 后端 |
 | 6 | frontend       | 5173 | `cd frontend && npx vite --port 5173` | Vue 前端（开发）|
@@ -318,9 +328,11 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 ### 注意事项
 
 - **llama-server**：PID 保存在根目录 `.llama_server.pid`，日志在 `logs/llama_server.log`
-- **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp
+- **llama.cpp 编译**：Jetson Orin NX 使用 `cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87 -DCMAKE_BUILD_TYPE=Release && cmake --build build --target llama-server -j$(nproc)`
+- **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp；Jetson Orin NX 使用 `DGGML_CUDA=ON` 与 `CMAKE_CUDA_ARCHITECTURES=87`
 - **mock-qt**：必须使用 `mock-qt/venv/bin/python`（系统 Python 缺少 httpx）
-- **backend venv**：必须先运行 `cd backend && python3.11 -m venv venv && pip install -r requirements.txt`
+- **backend venv**：优先运行 `./scripts/setup-nx.sh`；手动安装时使用 `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`
+- **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git，按 README 与 `docs/assets.md` 恢复
 - **日志目录**：`logs/`，命名格式：`{服务名}.log`
 - **代理绕过**：`start-all.sh` 自动设置 `no_proxy=localhost,...`；手动启动时若系统设置了 HTTP 代理，须在 `~/.bashrc` 中配置 `no_proxy`
 
@@ -377,7 +389,7 @@ AI: "已开始执行，预计 2 分钟完成"
 cd mcp-server
 
 # 安装依赖（首次运行）
-python3.11 -m venv venv
+python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 
 # 复制环境变量
