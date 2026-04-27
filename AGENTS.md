@@ -285,6 +285,9 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 # Jetson Orin NX 首次部署：安装系统依赖、创建 venv、安装前端依赖
 ./scripts/setup-nx.sh
 
+# 编译/安装不进 Git 的外部运行时：llama.cpp、whisper.cpp、MeloTTS
+./scripts/setup-runtime.sh
+
 # 下载外部模型资产；Qwen 需先配置实际下载地址
 export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
 DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
@@ -332,7 +335,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 - **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp；Jetson Orin NX 使用 `DGGML_CUDA=ON` 与 `CMAKE_CUDA_ARCHITECTURES=87`
 - **mock-qt**：必须使用 `mock-qt/venv/bin/python`（系统 Python 缺少 httpx）
 - **backend venv**：优先运行 `./scripts/setup-nx.sh`；手动安装时使用 `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`
-- **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git，按 README 与 `docs/assets.md` 恢复
+- **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git；外部运行时用 `./scripts/setup-runtime.sh` 恢复，模型用 `./scripts/download-models.sh` 恢复
 - **日志目录**：`logs/`，命名格式：`{服务名}.log`
 - **代理绕过**：`start-all.sh` 自动设置 `no_proxy=localhost,...`；手动启动时若系统设置了 HTTP 代理，须在 `~/.bashrc` 中配置 `no_proxy`
 

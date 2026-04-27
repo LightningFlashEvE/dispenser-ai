@@ -195,9 +195,14 @@ git clone <你的仓库地址> ~/dispenser-ai
 cd ~/dispenser-ai
 chmod +x scripts/*.sh llama_server.sh
 ./scripts/setup-nx.sh
+
+# 编译/安装外部运行时：llama.cpp、whisper.cpp、MeloTTS
+./scripts/setup-runtime.sh
 ```
 
-脚本会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv、MCP venv 和前端依赖。等价的核心命令如下：
+`setup-nx.sh` 会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv、MCP venv 和前端依赖。`setup-runtime.sh` 会恢复不进 Git 的外部运行时目录：`llama.cpp/`、`whisper.cpp/`、`melotts-git/`。
+
+等价的核心系统依赖命令如下：
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -243,6 +248,14 @@ npm install
 
 ### 步骤 4：下载模型资产
 
+模型文件不进 Git。脚本会把模型放到固定路径：
+
+| 模型 | 是否自动 | 放置路径 |
+|------|----------|----------|
+| Qwen GGUF | 半自动：你提供 `QWEN_GGUF_URL`，脚本下载 | `models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` |
+| Whisper base | 自动下载 | `models/whisper/ggml-base.bin` |
+| Whisper small | 设置 `DOWNLOAD_WHISPER_SMALL=1` 后自动下载 | `models/whisper/ggml-small.bin` |
+
 ```bash
 cd ~/dispenser-ai
 
@@ -260,7 +273,36 @@ LLM_MODEL_PATH=models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 WHISPER_CPP_MODEL_PATH=models/whisper/ggml-small.bin
 ```
 
-### 步骤 5：编译 llama.cpp 并启动 server
+### 步骤 5：编译/安装外部运行时（推荐自动）
+
+```bash
+cd ~/dispenser-ai
+./scripts/setup-runtime.sh
+```
+
+该脚本会自动完成：
+
+| 组件 | 动作 | 输出位置 |
+|------|------|----------|
+| llama.cpp | clone + CUDA 编译 `llama-server` | `llama.cpp/build/bin/llama-server` |
+| whisper.cpp | clone + CUDA 编译 `whisper-server` | `whisper.cpp/build/bin/whisper-server` |
+| MeloTTS | clone + 创建 `melotts-git/venv` + 安装依赖 + 写入 HTTP wrapper | `melotts-git/venv/bin/python`、`melotts-git/melo/tts_server.py` |
+
+只安装单个组件：
+
+```bash
+./scripts/setup-runtime.sh llama
+./scripts/setup-runtime.sh whisper
+./scripts/setup-runtime.sh melotts
+```
+
+如需更新已存在的外部仓库：
+
+```bash
+UPDATE_EXTERNAL=1 ./scripts/setup-runtime.sh
+```
+
+### 步骤 6：手动编译 llama.cpp（自动脚本失败时）
 
 ```bash
 cd ~/dispenser-ai
@@ -280,7 +322,7 @@ cd ~/dispenser-ai
 
 > Orin NX GPU 架构为 Ampere，CUDA architecture 使用 `87`。新版 llama.cpp 使用 `DGGML_CUDA=ON`，不要再用旧参数 `DLLAMA_CUDA=ON`。
 
-### 步骤 6：编译 whisper.cpp（ARM64/CUDA）
+### 步骤 7：手动编译 whisper.cpp（自动脚本失败时）
 
 ```bash
 cd ~/dispenser-ai
@@ -298,7 +340,7 @@ cd ~/dispenser-ai
 ./scripts/start-whisper-server.sh start
 ```
 
-### 步骤 7：安装 MeloTTS
+### 步骤 8：手动安装 MeloTTS（自动脚本失败时）
 
 ```bash
 cd ~/dispenser-ai
@@ -319,9 +361,9 @@ python3 -c "from melo.api import TTS; model = TTS(language='ZH')"
 ~/dispenser-ai/melotts-git/venv/bin/python ~/dispenser-ai/melotts-git/melo/tts_server.py --port 8020
 ```
 
-如果你使用的是原版 MeloTTS 且没有 `melo/tts_server.py`，需要放入项目的 MeloTTS HTTP 服务封装，或改用后端支持的其他 TTS 服务地址。
+`./scripts/setup-runtime.sh melotts` 会自动生成 `melotts-git/melo/tts_server.py`。如果手动安装原版 MeloTTS，必须同时提供这个 HTTP wrapper，否则后端无法访问 `/health`、`/speak`、`/synthesize`、`/stop`。
 
-### 步骤 8：配置环境变量
+### 步骤 9：配置环境变量
 
 ```bash
 cd ~/dispenser-ai/backend
@@ -342,7 +384,7 @@ nano .env
 | `ENV` | 改为 `production` | - |
 | `SKIP_CONFIRMATION` | 生产必须 `false` | - |
 
-### 步骤 9：确认硬件设备
+### 步骤 10：确认硬件设备
 
 ```bash
 # 天平串口
@@ -356,7 +398,7 @@ arecord -l
 python3 -c "import sounddevice as sd; print(sd.query_devices())"
 ```
 
-### 步骤 10：启动服务
+### 步骤 11：启动服务
 
 ```bash
 cd ~/dispenser-ai
@@ -365,7 +407,7 @@ cd ~/dispenser-ai
 
 后端默认监听 `http://0.0.0.0:8000`。生产模式会跳过 `mock-qt` 和 Vite dev server，并构建前端 `frontend/dist/`。
 
-### 步骤 11（可选）：配置开机自启（systemd）
+### 步骤 12（可选）：配置开机自启（systemd）
 
 创建 systemd 服务文件：
 

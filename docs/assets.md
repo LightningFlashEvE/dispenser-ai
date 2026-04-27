@@ -8,10 +8,10 @@
 |------|------|----------|
 | `models/` | LLM/ASR 模型体积大，部分文件超过 GitHub/LFS 常规限制 | 执行 `scripts/download-models.sh` 或 `scripts/download-models.ps1` |
 | `libs/` | Jetson 编译产物与目标机环境强相关 | 在目标机编译，或从 Release/对象存储下载 |
-| `llama.cpp/` | 外部项目源码和构建目录 | 按 README 或部署脚本 clone/build |
-| `whisper.cpp/` | 外部项目源码和构建目录 | 按 README 或部署脚本 clone/build |
-| `melotts-git/` | 外部 TTS 项目和 Python 环境 | 按 README 安装 |
-| `**/venv/` | 本机 Python 虚拟环境 | `python3.11 -m venv venv && pip install -r requirements.txt` |
+| `llama.cpp/` | 外部项目源码和构建目录 | 执行 `scripts/setup-runtime.sh llama` |
+| `whisper.cpp/` | 外部项目源码和构建目录 | 执行 `scripts/setup-runtime.sh whisper` |
+| `melotts-git/` | 外部 TTS 项目和 Python 环境 | 执行 `scripts/setup-runtime.sh melotts` |
+| `**/venv/` | 本机 Python 虚拟环境 | `python3 -m venv venv && pip install -r requirements.txt` |
 | `**/node_modules/` | Node 依赖缓存 | `npm install` |
 | `data/*.db`、`backend/data/*.db` | 本地业务数据，可能包含现场状态 | 由初始化流程创建或导入示例数据 |
 | `logs/`、`*.pid` | 运行态文件 | 服务启动后自动生成 |
@@ -26,7 +26,12 @@
 models/Qwen/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 ```
 
-该文件当前约 2.4GB，不适合直接进入 Git。推荐放在 Hugging Face、ModelScope、对象存储或 GitHub Release 分卷资产中，然后在下载脚本中配置 URL 和 SHA256。
+该文件当前约 2.4GB，不适合直接进入 Git。推荐放在 Hugging Face、ModelScope、对象存储或内网镜像中，然后通过环境变量交给下载脚本：
+
+```bash
+export QWEN_GGUF_URL="<Qwen3-4B-Instruct-2507-Q4_K_M.gguf 下载地址>"
+./scripts/download-models.sh
+```
 
 ### Whisper 模型
 
@@ -37,7 +42,29 @@ models/whisper/ggml-base.bin
 models/whisper/ggml-small.bin
 ```
 
-可从 `ggml-org/whisper.cpp` 的公开模型资产下载。
+`ggml-base.bin` 默认自动下载；`ggml-small.bin` 需要显式开启：
+
+```bash
+DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
+```
+
+## 外部运行时目录
+
+推荐自动恢复：
+
+```bash
+./scripts/setup-runtime.sh
+```
+
+恢复后目录如下：
+
+| 目录 | 关键文件 |
+|------|----------|
+| `llama.cpp/` | `llama.cpp/build/bin/llama-server` |
+| `whisper.cpp/` | `whisper.cpp/build/bin/whisper-server` |
+| `melotts-git/` | `melotts-git/venv/bin/python`、`melotts-git/melo/tts_server.py` |
+
+`melotts-git/melo/tts_server.py` 是本项目需要的 HTTP wrapper，提供 `/health`、`/speak`、`/synthesize`、`/stop`。如果使用原版 MeloTTS 手动安装，仍需补上这个 wrapper。
 
 ## 用户恢复流程
 
@@ -45,6 +72,8 @@ models/whisper/ggml-small.bin
 git clone https://github.com/LightningFlashEvE/dispenser-ai.git
 cd dispenser-ai
 cp .env.example .env
+./scripts/setup-nx.sh
+./scripts/setup-runtime.sh
 ./scripts/download-models.sh
 ./scripts/start-all.sh
 ```
