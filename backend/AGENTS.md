@@ -229,6 +229,8 @@ BALANCE_BAUD_RATE=9600
   - `chat.delta` / `chat.done`：AI 流式回复
   - `pending_intent` / `pending_cleared`
   - `tts.chunk` / `tts.done` / `tts_end`
+- 中文输出约束：
+  - `asr.final` 必须统一输出简体中文，再进入对话历史和后续 LLM 解析，避免 whisper 根据口音输出繁体或繁简混合文本
 - 兼容旧协议：
   - `audio_chunk` / `audio_end` / `transcript`
   - 旧版 base64 音频块必须做异常保护，坏包只返回错误，不允许打断整个 WebSocket 会话

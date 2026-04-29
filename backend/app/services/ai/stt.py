@@ -9,10 +9,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from opencc import OpenCC
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+_t2s_converter = OpenCC("t2s")
 
 
 @dataclass
@@ -134,17 +136,27 @@ class WhisperServerClient:
         return buffer.getvalue()
 
     def _parse_response(self, body: dict) -> TranscribeResult:
-        text = body.get("text", "")
+        text = _to_simplified_chinese(body.get("text", ""))
         segments = body.get("segments", [])
+        simplified_segments = []
+        for segment in segments:
+            if isinstance(segment, dict):
+                converted = dict(segment)
+                converted_text = converted.get("text")
+                if isinstance(converted_text, str):
+                    converted["text"] = _to_simplified_chinese(converted_text)
+                simplified_segments.append(converted)
+            else:
+                simplified_segments.append(segment)
         language = body.get("language", "zh")
         duration_ms = 0
-        if segments:
-            last_seg = segments[-1]
+        if simplified_segments:
+            last_seg = simplified_segments[-1]
             end_ts = last_seg.get("end", 0)
             duration_ms = int(end_ts * 1000)
         return TranscribeResult(
             text=text.strip(),
-            segments=segments,
+            segments=simplified_segments,
             language=language,
             duration_ms=duration_ms,
         )
@@ -218,3 +230,9 @@ def get_whisper_client() -> WhisperServerClient:
     if _whisper_client is None:
         _whisper_client = WhisperServerClient()
     return _whisper_client
+
+
+def _to_simplified_chinese(text: str) -> str:
+    if not text:
+        return text
+    return _t2s_converter.convert(text)

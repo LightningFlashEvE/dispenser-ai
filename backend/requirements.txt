@@ -39,3 +39,4 @@ numpy~=1.26                 # 音频数组处理
 python-dotenv~=1.0          # 加载 .env（开发阶段使用）
 python-multipart~=0.0.20    # FastAPI 文件上传支持
 psutil~=6.1                 # 系统资源监控（CPU/GPU/内存）
+opencc-python-reimplemented~=0.1  # ASR 中文结果统一转为简体
