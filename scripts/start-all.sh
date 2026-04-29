@@ -66,6 +66,30 @@ is_port_listening() {
     fi
 }
 
+port_pids() {
+    local port="$1"
+    if command -v fuser &>/dev/null; then
+        fuser "${port}/tcp" 2>/dev/null | xargs -r echo
+        return 0
+    fi
+    if command -v lsof &>/dev/null; then
+        lsof -ti tcp:"${port}" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+stop_port_processes() {
+    local port="$1" label="$2"
+    local pids
+    pids="$(port_pids "${port}")" || return 1
+    [ -z "${pids}" ] && return 1
+    warn "${label} 已被旧进程占用，正在释放 :${port} -> ${pids}"
+    kill ${pids} 2>/dev/null || true
+    sleep 1
+    return 0
+}
+
 get_lan_ip() {
     hostname -I 2>/dev/null | awk '{print $1}'
 }
@@ -102,6 +126,11 @@ ensure_frontend_dev_cert() {
 
     warn "生成 Vite 开发 HTTPS 证书失败，开发前端将以 HTTP 启动；局域网访问时浏览器会禁用麦克风" >&2
     return 1
+}
+
+frontend_scheme_matches() {
+    local expected_url="$1"
+    curl -ksf "${expected_url}" >/dev/null 2>&1
 }
 
 echo ""
@@ -249,7 +278,22 @@ if [ "${PROD_MODE}" = false ]; then
     fi
 
     if is_port_listening 5173; then
-        ok "frontend 已在监听 :5173（Vite 运行中）"
+        if frontend_scheme_matches "${FRONTEND_WAIT_URL}"; then
+            ok "frontend 已在监听 :5173（Vite 运行中）"
+        else
+            warn "frontend 已监听 :5173，但当前协议与预期不一致"
+            if ! stop_port_processes 5173 "frontend"; then
+                warn "无法自动释放 :5173，请先停止旧的 Vite 进程后再重试"
+            fi
+        fi
+    fi
+
+    if is_port_listening 5173; then
+        if frontend_scheme_matches "${FRONTEND_WAIT_URL}"; then
+            :
+        else
+            warn "frontend 端口仍被占用，跳过重新启动"
+        fi
     elif [ -d "${SCRIPT_DIR}/frontend/node_modules" ]; then
         # 清理可能残留的旧 PID 文件（PID 已被系统回收）
         rm -f "${PID_FILE_FE}"
