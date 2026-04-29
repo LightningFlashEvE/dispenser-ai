@@ -12,8 +12,8 @@
       </div>
     </div>
     <el-alert v-if="formulasStore.error" :title="formulasStore.error" type="error" show-icon style="margin:0 20px 12px" />
-    <div class="table-wrap">
-      <el-table v-loading="formulasStore.loading" :data="displayFormulas" row-key="formula_id" stripe height="100%" style="width:100%">
+    <div class="table-wrap wf-table-shell">
+      <el-table class="wf-data-table" v-loading="formulasStore.loading" :data="displayFormulas" row-key="formula_id" stripe height="100%" style="width:100%">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="steps-expand">
@@ -193,13 +193,13 @@ function fmtDate(iso: string) {
 .page-subtitle { font-size: 14px; color: var(--wf-text-muted); font-weight: 500; }
 .page-actions { display: flex; align-items: center; gap: 8px; }
 .table-wrap { flex: 1; overflow: hidden; padding: 0 20px 20px; margin-top: 16px; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #f0f0f0; color: var(--wf-text-muted); margin-right: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: rgba(255,255,255,0.06); color: var(--wf-text-soft); margin-right: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 .badge--blue { background: rgba(20, 110, 245, 0.1); color: var(--wf-blue); }
 .text-muted { color: var(--wf-text-muted); font-size: 13px; }
 .steps-expand { padding: 12px 20px 12px 56px; }
 .steps-empty { color: var(--wf-text-muted); font-size: 13px; font-style: italic; }
 .steps-list { display: flex; flex-direction: column; gap: 6px; }
-.step-item { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 10px; background: #f8f8f8; border-radius: 4px; border: 1px solid var(--wf-border-dark); }
+.step-item { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid var(--wf-border-subtle); }
 .step-idx { width: 24px; height: 24px; border-radius: 50%; background: var(--wf-blue); color: var(--wf-white); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
 .step-type { font-weight: 600; color: var(--wf-text-main); min-width: 80px; }
 .step-reagent { color: var(--wf-purple); font-family: var(--wf-font-mono); font-size: 12px; background: rgba(122, 61, 255, 0.1); padding: 2px 6px; border-radius: 3px; }
@@ -211,7 +211,7 @@ function fmtDate(iso: string) {
 .steps-section-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--wf-bg-panel); border-bottom: 1px solid var(--wf-border-dark); }
 .steps-section-title { font-size: 13px; font-weight: 600; color: var(--wf-text-main); }
 .steps-section-empty { padding: 16px 12px; color: var(--wf-text-muted); font-size: 13px; text-align: center; }
-.step-editor { border-bottom: 1px solid #f0f0f0; padding: 10px 12px; }
+.step-editor { border-bottom: 1px solid var(--wf-border-subtle); padding: 10px 12px; }
 .step-editor:last-child { border-bottom: none; }
 .step-editor-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .step-editor-idx { font-size: 12px; font-weight: 700; color: var(--wf-blue); min-width: 40px; }

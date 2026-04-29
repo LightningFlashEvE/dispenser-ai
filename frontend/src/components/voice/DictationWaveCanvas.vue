@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .dictation-wave-canvas {
   width: 100%;
-  height: 56px;
+  height: 100%;
   position: relative;
 }
 

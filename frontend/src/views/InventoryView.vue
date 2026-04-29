@@ -14,8 +14,8 @@
 
     <el-alert v-if="inventoryStore.error" :title="inventoryStore.error" type="error" show-icon style="margin:0 20px 12px" />
 
-    <div class="table-wrap">
-      <el-table v-loading="inventoryStore.loading" :data="displayDrugs" row-key="reagent_code" stripe height="100%" style="width:100%">
+    <div class="table-wrap wf-table-shell">
+      <el-table class="wf-data-table" v-loading="inventoryStore.loading" :data="displayDrugs" row-key="reagent_code" stripe height="100%" style="width:100%">
         <el-table-column prop="reagent_code" label="编号" width="100" fixed />
         <el-table-column prop="reagent_name_cn" label="中文名" min-width="140" show-overflow-tooltip />
         <el-table-column prop="reagent_name_formula" label="化学式" width="110" show-overflow-tooltip />
@@ -210,7 +210,7 @@ function fmtDate(iso: string) {
 .page-subtitle { font-size: 14px; color: var(--wf-text-muted); font-weight: 500; }
 .page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .table-wrap { flex: 1; overflow: hidden; padding: 0 20px 20px; margin-top: 16px; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #f0f0f0; color: var(--wf-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: rgba(255,255,255,0.06); color: var(--wf-text-soft); text-transform: uppercase; letter-spacing: 0.5px; }
 .badge--blue { background: rgba(20, 110, 245, 0.1); color: var(--wf-blue); }
 .stock-low { color: var(--wf-red); font-weight: 600; }
 .stock-ok  { color: var(--wf-text-main); }

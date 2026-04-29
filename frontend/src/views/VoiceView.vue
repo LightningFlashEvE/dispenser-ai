@@ -102,13 +102,13 @@
       <div class="composer-shell" :class="{ 'composer-shell--dictating': isDictationMode }">
         <transition name="composer-swap" mode="out-in">
           <div v-if="isDictationMode" key="dictation" class="dictation-panel">
+            <div class="dictation-wave" aria-hidden="true">
+              <DictationWaveCanvas :is-active="voiceStore.isRecording" :level="voiceStore.micLevel" />
+            </div>
             <div class="dictation-copy">
               <div class="dictation-eyebrow">听写中</div>
               <div class="dictation-title">{{ dictationTitle }}</div>
               <div class="dictation-subtitle">{{ dictationSubtitle }}</div>
-            </div>
-            <div class="dictation-wave" aria-hidden="true">
-              <DictationWaveCanvas :is-active="voiceStore.isRecording" :level="voiceStore.micLevel" />
             </div>
           </div>
           <div v-else key="text" class="text-input-wrap">
@@ -326,13 +326,13 @@ function fmtTime(iso: string) {
 .text-input { flex: 1; border: 1px solid var(--wf-border-dark); border-radius: 28px; padding: 16px 24px; font-size: 16px; outline: none; background: var(--wf-bg-panel); transition: border-color 0.15s; box-shadow: inset 0 1px 4px rgba(0,0,0,0.03); color: var(--wf-text-main); }
 .text-input:focus { border-color: var(--wf-blue); }
 .btn--send { border-radius: 28px; padding: 0 24px; font-size: 15px; }
-.dictation-panel { min-height: 64px; border: 1px solid rgba(20, 110, 245, 0.22); border-radius: 28px; background: linear-gradient(135deg, rgba(20, 110, 245, 0.14), rgba(12, 22, 40, 0.96)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 32px rgba(7, 15, 28, 0.18); padding: 10px 18px 10px 22px; display: flex; align-items: center; justify-content: space-between; gap: 18px; overflow: hidden; position: relative; }
+.dictation-panel { min-height: 64px; border: 1px solid rgba(20, 110, 245, 0.22); border-radius: 28px; background: linear-gradient(135deg, rgba(20, 110, 245, 0.14), rgba(12, 22, 40, 0.96)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 32px rgba(7, 15, 28, 0.18); padding: 10px 22px; display: flex; align-items: center; overflow: hidden; position: relative; isolation: isolate; }
 .dictation-panel::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); transform: translateX(-100%); animation: dictation-sheen 2.6s linear infinite; pointer-events: none; }
-.dictation-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; position: relative; z-index: 1; }
+.dictation-copy { min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 2px; position: relative; z-index: 1; }
 .dictation-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: rgba(255,255,255,0.62); }
 .dictation-title { font-size: 15px; line-height: 1.4; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dictation-subtitle { font-size: 12px; line-height: 1.4; color: rgba(220, 232, 255, 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dictation-wave { width: 220px; height: 56px; flex-shrink: 0; position: relative; z-index: 1; }
+.dictation-wave { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.96; }
 .voice-btn { flex-shrink: 0; width: 80px; height: 80px; border: none; border-radius: 50%; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); margin-left: 8px; }
 .voice-btn:hover:not(.voice-btn--disabled) { transform: scale(1.05); box-shadow: 0 4px 12px rgba(20, 110, 245, 0.3); }
 .voice-btn--recording { animation: recording-pulse 1.5s infinite; }
@@ -353,8 +353,7 @@ function fmtTime(iso: string) {
 
 @media (max-width: 900px) {
   .input-area { padding: 12px 16px 20px; gap: 10px; }
-  .dictation-panel { padding: 10px 14px 10px 18px; gap: 14px; }
-  .dictation-wave { width: 140px; height: 48px; }
+  .dictation-panel { padding: 10px 18px; }
   .voice-btn { width: 72px; height: 72px; margin-left: 0; }
 }
 </style>

@@ -13,8 +13,8 @@
         <el-button @click="fetchLogs">刷新</el-button>
       </div>
     </div>
-    <div class="table-wrap">
-      <el-table v-loading="loading" :data="logs" stripe height="100%" style="width:100%">
+    <div class="table-wrap wf-table-shell">
+      <el-table class="wf-data-table" v-loading="loading" :data="logs" stripe height="100%" style="width:100%">
         <el-table-column prop="task_id" label="任务 ID" width="220" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="90" align="center">
           <template #default="{ row }">
@@ -62,17 +62,17 @@ function fmtDate(iso: string) {
 
 <style scoped>
 .page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.page-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #d8d8d8; flex-shrink: 0; gap: 16px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--wf-border-dark); flex-shrink: 0; gap: 16px; }
 .page-title-block { display: flex; align-items: baseline; gap: 10px; }
 .page-title { font-size: 20px; font-weight: 600; color: var(--wf-text-main); }
-.page-subtitle { font-size: 13px; color: #888; }
+.page-subtitle { font-size: 13px; color: var(--wf-text-muted); }
 .page-actions { display: flex; align-items: center; gap: 8px; }
 .table-wrap { flex: 1; overflow: hidden; padding: 0 20px 20px; }
-.text-muted { color: #ababab; }
+.text-muted { color: var(--wf-text-muted); }
 .text-error { color: #ee1d36; font-size: 13px; }
-.status-tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #f0f0f0; color: var(--wf-text-muted); }
-.status-completed { background: #e8fff0; color: #00a81a; }
-.status-failed    { background: #ffe8e8; color: #ee1d36; }
-.status-cancelled { background: #f0f0f0; color: var(--wf-text-muted); }
-.status-executing { background: #eef0ff; color: #7a3dff; }
+.status-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: rgba(255,255,255,0.06); color: var(--wf-text-soft); letter-spacing: 0.5px; }
+.status-completed { background: rgba(0, 215, 34, 0.12); color: #7ef6a1; }
+.status-failed    { background: rgba(238, 29, 54, 0.14); color: #ff8b9b; }
+.status-cancelled { background: rgba(255,255,255,0.06); color: var(--wf-text-muted); }
+.status-executing { background: rgba(122, 61, 255, 0.16); color: #b99bff; }
 </style>
