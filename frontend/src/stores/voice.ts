@@ -25,6 +25,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const micError = ref<MicError | null>(null)
   const currentSessionId = ref<string | null>(null)
   const isRecording = ref(false)
+  const micLevel = ref(0)
 
   const _ws = new VoiceWebSocket()
   const _recorder = new AudioRecorder()
@@ -53,6 +54,7 @@ export const useVoiceStore = defineStore('voice', () => {
       isConnected.value = connected
       if (!connected) {
         isRecording.value = false
+        micLevel.value = 0
         sessionState.value = 'idle'
       }
     })
@@ -62,6 +64,7 @@ export const useVoiceStore = defineStore('voice', () => {
     _ws.disconnect()
     _recorder.stopRecording()
     isRecording.value = false
+    micLevel.value = 0
     _player.dispose()
   }
 
@@ -69,6 +72,7 @@ export const useVoiceStore = defineStore('voice', () => {
     if (_recorder.isRecording) {
       _recorder.stopRecording()
       isRecording.value = false
+      micLevel.value = 0
     }
     _player.stopAll()
     currentSessionId.value = sessionId
@@ -163,7 +167,10 @@ export const useVoiceStore = defineStore('voice', () => {
   async function initAudio(): Promise<void> {
     if (audioInited.value) return
     try {
-      await _recorder.init((frame: ArrayBuffer) => { _ws.sendAudioFrame(frame) })
+      await _recorder.init((frame: ArrayBuffer) => {
+        micLevel.value = calcMicLevel(frame)
+        _ws.sendAudioFrame(frame)
+      })
       audioInited.value = true
       audioError.value = null
       micError.value = null
@@ -188,6 +195,7 @@ export const useVoiceStore = defineStore('voice', () => {
     const result = await _recorder.startRecording()
     if (!result.ok) {
       isRecording.value = false
+      micLevel.value = 0
       micError.value = result.error
       return
     }
@@ -197,6 +205,7 @@ export const useVoiceStore = defineStore('voice', () => {
   function stopRecording(): void {
     _recorder.stopRecording()
     isRecording.value = false
+    micLevel.value = 0
     if (!isConnected.value) {
       micError.value = {
         code: 'ConnectionError',
@@ -214,10 +223,25 @@ export const useVoiceStore = defineStore('voice', () => {
   function clearMessages(): void { messages.value = []; _streamingId = null; asrPartial.value = ''; pendingIntent.value = null }
   function clearMicError(): void { micError.value = null }
 
+  function calcMicLevel(frame: ArrayBuffer): number {
+    const samples = new Int16Array(frame)
+    if (samples.length === 0) return 0
+
+    let sum = 0
+    for (let i = 0; i < samples.length; i += 1) {
+      const normalized = samples[i] / 32768
+      sum += normalized * normalized
+    }
+
+    const rms = Math.sqrt(sum / samples.length)
+    const boosted = Math.min(1, rms * 8)
+    return Math.pow(boosted, 0.65)
+  }
+
   return {
     sessionState, messages, asrPartial, pendingIntent, isConnected, errorMsg,
     balanceMg, balanceStable, balanceOverLimit, audioInited, audioError,
-    isRecording, isPlaying, stateLabel,
+    isRecording, isPlaying, stateLabel, micLevel,
     currentSessionId, micError,
     connect, disconnect, switchSession, loadHistory, initAudio, startRecording, stopRecording,
     sendText, confirm, cancelPending, cancelTask, clearMessages, clearMicError,

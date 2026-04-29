@@ -108,7 +108,7 @@
               <div class="dictation-subtitle">{{ dictationSubtitle }}</div>
             </div>
             <div class="dictation-wave" aria-hidden="true">
-              <span v-for="bar in 12" :key="bar" class="dictation-bar" :style="{ '--bar-index': bar }"></span>
+              <DictationWaveCanvas :is-active="voiceStore.isRecording" :level="voiceStore.micLevel" />
             </div>
           </div>
           <div v-else key="text" class="text-input-wrap">
@@ -134,6 +134,7 @@ import { useVoiceStore } from '@/stores/voice'
 import { useSessionsStore } from '@/stores/sessions'
 import SessionList from '@/components/voice/SessionList.vue'
 import LissajousAvatar from '@/components/voice/LissajousAvatar.vue'
+import DictationWaveCanvas from '@/components/voice/DictationWaveCanvas.vue'
 import { Microphone, ChatLineRound } from '@element-plus/icons-vue'
 
 const voiceStore = useVoiceStore()
@@ -331,17 +332,12 @@ function fmtTime(iso: string) {
 .dictation-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: rgba(255,255,255,0.62); }
 .dictation-title { font-size: 15px; line-height: 1.4; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dictation-subtitle { font-size: 12px; line-height: 1.4; color: rgba(220, 232, 255, 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dictation-wave { width: 160px; height: 40px; display: flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; position: relative; z-index: 1; }
-.dictation-bar { width: 5px; height: 14px; border-radius: 999px; background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(95, 181, 255, 0.55)); box-shadow: 0 0 14px rgba(95, 181, 255, 0.28); transform-origin: center; animation: dictation-wave 1.1s ease-in-out infinite; animation-delay: calc(var(--bar-index) * 0.08s); }
+.dictation-wave { width: 220px; height: 56px; flex-shrink: 0; position: relative; z-index: 1; }
 .voice-btn { flex-shrink: 0; width: 80px; height: 80px; border: none; border-radius: 50%; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); margin-left: 8px; }
 .voice-btn:hover:not(.voice-btn--disabled) { transform: scale(1.05); box-shadow: 0 4px 12px rgba(20, 110, 245, 0.3); }
 .voice-btn--recording { animation: recording-pulse 1.5s infinite; }
 .voice-btn--recording:hover:not(.voice-btn--disabled) { transform: scale(1.05); box-shadow: 0 4px 12px rgba(238, 29, 54, 0.3); }
 @keyframes recording-pulse { 0% { box-shadow: 0 0 0 0 rgba(238,29,54,0.4); } 70% { box-shadow: 0 0 0 12px rgba(238,29,54,0); } 100% { box-shadow: 0 0 0 0 rgba(238,29,54,0); } }
-@keyframes dictation-wave {
-  0%, 100% { transform: scaleY(0.45); opacity: 0.45; }
-  50% { transform: scaleY(1.65); opacity: 1; }
-}
 @keyframes dictation-sheen {
   100% { transform: translateX(100%); }
 }
@@ -358,8 +354,7 @@ function fmtTime(iso: string) {
 @media (max-width: 900px) {
   .input-area { padding: 12px 16px 20px; gap: 10px; }
   .dictation-panel { padding: 10px 14px 10px 18px; gap: 14px; }
-  .dictation-wave { width: 110px; gap: 4px; }
-  .dictation-bar { width: 4px; }
+  .dictation-wave { width: 140px; height: 48px; }
   .voice-btn { width: 72px; height: 72px; margin-left: 0; }
 }
 </style>
