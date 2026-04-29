@@ -22,7 +22,7 @@ check_service() {
     fi
 
     if [ -n "${health_url}" ]; then
-        if curl -sf "${health_url}" >/dev/null 2>&1; then
+        if curl -ksf "${health_url}" >/dev/null 2>&1; then
             health_status="${GREEN}健康${RESET}"
         else
             health_status="${RED}无响应${RESET}"
@@ -43,6 +43,14 @@ check_service() {
     echo ""
 }
 
+check_frontend() {
+    local health_url="https://127.0.0.1:5173"
+    if ! curl -ksf "${health_url}" >/dev/null 2>&1; then
+        health_url="http://127.0.0.1:5173"
+    fi
+    check_service "frontend" ".frontend.pid" "${health_url}"
+}
+
 echo ""
 echo -e "${CYAN}=== 服务状态 ===${RESET}"
 echo ""
@@ -55,7 +63,7 @@ check_service "MeloTTS"        ".melotts.pid"         "http://127.0.0.1:8020/hea
 check_service "mock-qt"        ".mock_qt.pid"         "http://127.0.0.1:9000/api/status"
 check_service "backend"        ".backend.pid"         "http://127.0.0.1:8000/health"
 check_service "mcp-server"     ".mcp_server.pid"      ""
-check_service "frontend"       ".frontend.pid"        "http://127.0.0.1:5173"
+check_frontend
 
 echo ""
 echo -e "${CYAN}日志目录: ${SCRIPT_DIR}/logs/${RESET}"

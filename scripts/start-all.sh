@@ -45,7 +45,7 @@ wait_for_url() {
     local url="$1" name="$2" timeout="${3:-60}"
     info "等待 ${name} 就绪 (最多 ${timeout}s)..."
     for i in $(seq 1 "${timeout}"); do
-        if curl -sf "${url}" >/dev/null 2>&1; then
+        if curl -ksf "${url}" >/dev/null 2>&1; then
             ok "${name} 已就绪"
             return 0
         fi
@@ -64,6 +64,44 @@ is_port_listening() {
     else
         netstat -tlnp 2>/dev/null | grep -q ":${port} "
     fi
+}
+
+get_lan_ip() {
+    hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+ensure_frontend_dev_cert() {
+    local lan_ip="$1"
+    local cert_dir="${SCRIPT_DIR}/.certs"
+    local cert_path="${cert_dir}/vite-dev.crt"
+    local key_path="${cert_dir}/vite-dev.key"
+    local cn="${lan_ip:-localhost}"
+    local san="DNS:localhost,IP:127.0.0.1"
+
+    if [ -n "${lan_ip}" ]; then
+        san="IP:${lan_ip},${san}"
+    fi
+
+    if [ -s "${cert_path}" ] && [ -s "${key_path}" ]; then
+        echo "${cert_path}|${key_path}"
+        return 0
+    fi
+
+    if ! command -v openssl &>/dev/null; then
+        warn "未找到 openssl，开发前端将以 HTTP 启动；局域网访问时浏览器会禁用麦克风" >&2
+        return 1
+    fi
+
+    mkdir -p "${cert_dir}"
+    if openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
+        -keyout "${key_path}" -out "${cert_path}" \
+        -subj "/CN=${cn}" -addext "subjectAltName=${san}" >/dev/null 2>&1; then
+        echo "${cert_path}|${key_path}"
+        return 0
+    fi
+
+    warn "生成 Vite 开发 HTTPS 证书失败，开发前端将以 HTTP 启动；局域网访问时浏览器会禁用麦克风" >&2
+    return 1
 }
 
 echo ""
@@ -194,17 +232,33 @@ fi
 if [ "${PROD_MODE}" = false ]; then
     info "[7/7] frontend (Vite dev :5173)"
     PID_FILE_FE=".frontend.pid"
+    LAN_IP=$(get_lan_ip)
+    FRONTEND_LOCAL_URL="http://localhost:5173"
+    FRONTEND_LAN_URL="http://${LAN_IP}:5173"
+    FRONTEND_WAIT_URL="http://127.0.0.1:5173"
+    FRONTEND_ENV=""
+
+    cert_pair="$(ensure_frontend_dev_cert "${LAN_IP}")"
+    if [ $? -eq 0 ]; then
+        cert_path="${cert_pair%%|*}"
+        key_path="${cert_pair##*|}"
+        FRONTEND_LOCAL_URL="https://localhost:5173"
+        FRONTEND_LAN_URL="https://${LAN_IP}:5173"
+        FRONTEND_WAIT_URL="https://127.0.0.1:5173"
+        FRONTEND_ENV="USE_HTTPS=true SSL_CERT_PATH='${cert_path}' SSL_KEY_PATH='${key_path}'"
+    fi
+
     if is_port_listening 5173; then
         ok "frontend 已在监听 :5173（Vite 运行中）"
     elif [ -d "${SCRIPT_DIR}/frontend/node_modules" ]; then
         # 清理可能残留的旧 PID 文件（PID 已被系统回收）
         rm -f "${PID_FILE_FE}"
         # 必须 cd 到 frontend/ 目录，否则 Vite 找不到 vite.config.ts
-        nohup bash -c "cd '${SCRIPT_DIR}/frontend' && exec npx vite --port 5173" \
+        nohup bash -c "cd '${SCRIPT_DIR}/frontend' && ${FRONTEND_ENV} exec npx vite --host 0.0.0.0 --port 5173" \
             >> "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
         echo $! > "${PID_FILE_FE}"
         ok "frontend 已启动 (PID: $!)"
-        wait_for_url "http://127.0.0.1:5173" "frontend" 25 || warn "frontend 未响应（Vite 首次启动较慢，可稍后访问）"
+        wait_for_url "${FRONTEND_WAIT_URL}" "frontend" 25 || warn "frontend 未响应（Vite 首次启动较慢，可稍后访问）"
     else
         warn "frontend/node_modules 不存在，请先运行: cd frontend && npm install"
     fi
@@ -242,8 +296,9 @@ if [ "${PROD_MODE}" = true ]; then
     echo -e "${GREEN}前端入口 (nginx):  https://${LAN_IP}${RESET}"
     echo -e "${GREEN}后端 API:          http://${LAN_IP}:8000${RESET}"
 else
-    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-    echo -e "${GREEN}开发前端 (本机):   http://localhost:5173${RESET}"
-    echo -e "${GREEN}开发前端 (局域网): http://${LAN_IP}:5173${RESET}"
+    LAN_IP=$(get_lan_ip)
+    echo -e "${GREEN}开发前端 (本机):   ${FRONTEND_LOCAL_URL:-http://localhost:5173}${RESET}"
+    echo -e "${GREEN}开发前端 (局域网): ${FRONTEND_LAN_URL:-http://${LAN_IP}:5173}${RESET}"
+    echo -e "${YELLOW}提示: 局域网设备使用麦克风必须打开 HTTPS 地址；首次访问自签名证书页面时需要在浏览器中继续访问。${RESET}"
     echo -e "${GREEN}后端 API:          http://${LAN_IP}:8000${RESET}"
 fi

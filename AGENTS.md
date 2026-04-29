@@ -327,7 +327,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 | 3 | MeloTTS        | 8020 | `melotts-git/venv/bin/python melotts-git/melo/tts_server.py --port 8020` | TTS |
 | 4 | mock-qt        | 9000 | `mock-qt/venv/bin/python mock-qt/server.py --port 9000` | 后级控制模拟（仅开发）|
 | 5 | backend        | 8000 | `backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend` | FastAPI 后端 |
-| 6 | frontend       | 5173 | `cd frontend && npx vite --port 5173` | Vue 前端（开发）|
+| 6 | frontend       | 5173 | `cd frontend && USE_HTTPS=true SSL_CERT_PATH=../.certs/vite-dev.crt SSL_KEY_PATH=../.certs/vite-dev.key npx vite --host 0.0.0.0 --port 5173` | Vue 前端（开发，局域网麦克风需 HTTPS）|
 
 ### 注意事项
 
@@ -336,6 +336,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 - **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp；Jetson Orin NX 使用 `DGGML_CUDA=ON` 与 `CMAKE_CUDA_ARCHITECTURES=87`
 - **mock-qt**：必须使用 `mock-qt/venv/bin/python`（系统 Python 缺少 httpx）
 - **backend venv**：优先运行 `./scripts/setup-nx.sh`；手动安装时使用 `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`
+- **前端麦克风**：`localhost` 可用 HTTP；手机/触摸屏/其他电脑通过局域网 IP 访问时必须使用 HTTPS，否则浏览器会隐藏 `navigator.mediaDevices` 并禁止麦克风。`./scripts/start-all.sh` 会自动生成 `.certs/vite-dev.crt` / `.certs/vite-dev.key` 并以 HTTPS 启动 Vite。
 - **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git；外部运行时用 `./scripts/setup-runtime.sh` 恢复，模型用 `./scripts/download-models.sh` 恢复
 - **日志目录**：`logs/`，命名格式：`{服务名}.log`
 - **代理绕过**：`start-all.sh` 自动设置 `no_proxy=localhost,...`；手动启动时若系统设置了 HTTP 代理，须在 `~/.bashrc` 中配置 `no_proxy`

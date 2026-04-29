@@ -40,7 +40,8 @@ cp .env.example .env
 > 模型、虚拟环境、编译产物、日志和本地数据库不进入 Git 仓库。完整说明见 [docs/assets.md](docs/assets.md)。
 
 启动后访问：
-- **前端**：http://localhost:5173
+- **前端（本机）**：http://localhost:5173 或启动脚本输出的 https://localhost:5173
+- **前端（局域网麦克风）**：必须使用启动脚本输出的 `https://<jetson-ip>:5173`，HTTP 局域网页面会被浏览器禁止调用麦克风
 - **后端健康检查**：http://localhost:8000/health
 - **MCP Server**：通过 stdio 模式接入 MCP Client
 
@@ -208,7 +209,7 @@ chmod +x scripts/*.sh llama_server.sh
 sudo apt update && sudo apt upgrade -y
 
 sudo apt install -y \
-    ca-certificates curl wget git git-lfs \
+    ca-certificates curl wget git git-lfs openssl \
     build-essential cmake ninja-build pkg-config \
     python3 python3-venv python3-dev python3-pip \
     sqlite3 ffmpeg v4l-utils alsa-utils portaudio19-dev \

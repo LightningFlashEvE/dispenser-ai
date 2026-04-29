@@ -22,6 +22,7 @@ frontend/.vite/
 backend/.env
 .env.local
 .env.*.local
+.certs/
 
 # 数据库
 data/*.db

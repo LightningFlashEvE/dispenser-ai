@@ -19,7 +19,7 @@ fi
 info "Installing system packages"
 sudo apt-get update
 sudo apt-get install -y \
-  ca-certificates curl wget git git-lfs \
+  ca-certificates curl wget git git-lfs openssl \
   build-essential cmake ninja-build pkg-config \
   "${PYTHON_BIN}" python3-venv python3-dev python3-pip \
   sqlite3 ffmpeg v4l-utils alsa-utils portaudio19-dev \

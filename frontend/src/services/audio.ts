@@ -4,8 +4,7 @@
  * 录音链路：
  *   安全上下文（HTTPS / localhost）：
  *     AudioContext(16kHz) → MediaStream → AudioWorkletNode(pcm-processor)
- *   非安全上下文（HTTP 非 localhost）：
- *     AudioContext(16kHz) → MediaStream → ScriptProcessorNode → Int16 PCM
+ *     如 AudioWorklet 不可用，则降级到 ScriptProcessorNode
  *   → 统一回调 → WS send(binary)
  *
  * 播放链路：
@@ -42,6 +41,17 @@ export interface MicError {
   message: string
 }
 
+function isLocalhost(): boolean {
+  return ['localhost', '127.0.0.1', '::1'].includes(location.hostname)
+}
+
+function insecureContextMessage(): string {
+  if (isLocalhost()) {
+    return '当前浏览器未把本机页面识别为安全上下文，请改用 http://localhost:5173 或 https://localhost:5173'
+  }
+  return `当前页面是 ${location.protocol}//${location.host}，浏览器禁止 HTTP 局域网页面使用麦克风。请用启动脚本输出的 HTTPS 局域网地址访问。`
+}
+
 function micErrorMessage(e: unknown): MicError {
   const err = e as DOMException
   if (err.name === 'NotAllowedError') {
@@ -54,7 +64,7 @@ function micErrorMessage(e: unknown): MicError {
     return { code: 'NotReadableError', message: '麦克风被其他程序占用，请关闭其他使用麦克风的应用' }
   }
   if (err.name === 'SecurityError') {
-    return { code: 'SecurityError', message: '非 HTTPS 环境无法使用麦克风，请使用 HTTPS 访问' }
+    return { code: 'SecurityError', message: insecureContextMessage() }
   }
   return { code: 'UnknownError', message: err.message || '麦克风初始化失败' }
 }
@@ -89,14 +99,14 @@ export class AudioRecorder {
     this.silentSink.connect(this.ctx.destination)
 
     if (this.ctx.audioWorklet) {
-      // 安全上下文（HTTPS / localhost）：使用 AudioWorklet
+      // 安全上下文（HTTPS / localhost）：优先使用 AudioWorklet
       await this.ctx.audioWorklet.addModule('/worklets/pcm-processor.js')
       this.worklet = new AudioWorkletNode(this.ctx, 'pcm-processor')
       this.worklet.port.onmessage = (evt: MessageEvent<ArrayBuffer>) => {
         if (!this._paused && this._onFrame) this._onFrame(evt.data)
       }
     } else {
-      // 非安全上下文（HTTP 非 localhost）：降级为 ScriptProcessorNode
+      // AudioWorklet 不可用时降级为 ScriptProcessorNode
       // 512 样本 ≈ 32ms @ 16kHz，对语音识别完全够用
       this.processor = this.ctx.createScriptProcessor(512, 1, 1)
       this.processor.onaudioprocess = (evt: AudioProcessingEvent) => {
@@ -121,12 +131,18 @@ export class AudioRecorder {
       return { ok: false, error: { code: 'UnknownError', message: '录音器未初始化，请先调用 init()' } }
     }
 
+    if (!window.isSecureContext) {
+      return { ok: false, error: {
+        code: 'SecurityError' as MicErrorCode,
+        message: insecureContextMessage(),
+      }}
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const secureContext = window.isSecureContext
-      if (!secureContext) {
+      if (location.protocol !== 'https:' && !isLocalhost()) {
         return { ok: false, error: {
           code: 'SecurityError' as MicErrorCode,
-          message: '当前页面为 HTTP 非 localhost 环境，浏览器禁止使用麦克风。请使用 HTTPS 访问（如 https://192.168.10.175:5173）',
+          message: insecureContextMessage(),
         }}
       }
       return { ok: false, error: {
