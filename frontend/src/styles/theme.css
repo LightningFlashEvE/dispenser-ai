@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   /* 
    * Webflow Design System Inspiration 
@@ -78,6 +82,27 @@
 
   --el-font-family: var(--wf-font-family);
   --el-box-shadow-light: 0 3px 7px rgba(0,0,0,0.5);
+
+  --background: 222 42% 5%;
+  --foreground: 214 32% 94%;
+  --card: 222 36% 8%;
+  --card-foreground: 214 32% 94%;
+  --popover: 222 34% 9%;
+  --popover-foreground: 214 32% 94%;
+  --primary: 198 93% 48%;
+  --primary-foreground: 222 47% 6%;
+  --secondary: 218 28% 14%;
+  --secondary-foreground: 214 32% 94%;
+  --muted: 220 22% 14%;
+  --muted-foreground: 215 16% 66%;
+  --accent: 210 44% 18%;
+  --accent-foreground: 214 32% 94%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 218 25% 18%;
+  --input: 218 25% 18%;
+  --ring: 198 93% 48%;
+  --radius: 0.5rem;
 }
 
 body {
@@ -85,6 +110,22 @@ body {
   background: var(--wf-bg-page);
   color: var(--wf-text-main);
   -webkit-font-smoothing: antialiased;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #app {
+    @apply h-full bg-background text-foreground;
+  }
 }
 
 /* Base button override to include translation hover if it's an el-button */
