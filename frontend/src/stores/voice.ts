@@ -24,13 +24,13 @@ export const useVoiceStore = defineStore('voice', () => {
   const audioError = ref<string | null>(null)
   const micError = ref<MicError | null>(null)
   const currentSessionId = ref<string | null>(null)
+  const isRecording = ref(false)
 
   const _ws = new VoiceWebSocket()
   const _recorder = new AudioRecorder()
   const _player = new AudioPlayer()
   let _streamingId: string | null = null
 
-  const isRecording = computed(() => _recorder.isRecording)
   const isPlaying = computed(() => _player.isPlaying)
 
   const stateLabel = computed<string>(() => {
@@ -51,19 +51,24 @@ export const useVoiceStore = defineStore('voice', () => {
     }
     _ws.connect(url, _onMessage, (connected) => {
       isConnected.value = connected
-      if (!connected) sessionState.value = 'idle'
+      if (!connected) {
+        isRecording.value = false
+        sessionState.value = 'idle'
+      }
     })
   }
 
   function disconnect(): void {
     _ws.disconnect()
     _recorder.stopRecording()
+    isRecording.value = false
     _player.dispose()
   }
 
   function switchSession(sessionId: string): void {
     if (_recorder.isRecording) {
       _recorder.stopRecording()
+      isRecording.value = false
     }
     _player.stopAll()
     currentSessionId.value = sessionId
@@ -182,12 +187,16 @@ export const useVoiceStore = defineStore('voice', () => {
     _ws.bargeIn()
     const result = await _recorder.startRecording()
     if (!result.ok) {
+      isRecording.value = false
       micError.value = result.error
+      return
     }
+    isRecording.value = true
   }
 
   function stopRecording(): void {
     _recorder.stopRecording()
+    isRecording.value = false
     if (!isConnected.value) {
       micError.value = {
         code: 'ConnectionError',
