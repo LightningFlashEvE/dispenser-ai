@@ -22,11 +22,11 @@ let width = 0
 let height = 0
 let dpr = 1
 let phase = 0
-let energy = 0.18
 let displayedLevel = 0
 
 function resizeCanvas(): void {
   if (!containerEl.value || !canvasEl.value || !ctx) return
+
   width = Math.max(1, Math.floor(containerEl.value.clientWidth))
   height = Math.max(1, Math.floor(containerEl.value.clientHeight))
   dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
@@ -36,80 +36,56 @@ function resizeCanvas(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 }
 
-function drawLine(
-  amplitude: number,
-  speed: number,
-  alpha: number,
-  lineWidth: number,
-  color: string,
-  offset: number,
-): void {
-  if (!ctx) return
-
-  const centerY = height / 2
-  ctx.beginPath()
-  const steps = Math.max(72, Math.floor(width / 8))
-  for (let i = 0; i <= steps; i += 1) {
-    const x = (i / steps) * width
-    const nx = x / width
-    const envelope = Math.pow(Math.sin(nx * Math.PI), 1.85)
-    const wobble =
-      Math.sin(nx * 6.2 - phase * speed + offset) * 0.72 +
-      Math.sin(nx * 12.4 + phase * speed * 1.12 + offset * 0.6) * 0.18
-    const y = centerY + wobble * amplitude * envelope
-    if (i === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  }
-
-  ctx.strokeStyle = color
-  ctx.lineWidth = lineWidth
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  ctx.globalAlpha = alpha
-  ctx.stroke()
-  ctx.globalAlpha = 1
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
 }
 
-function drawBaseline(): void {
+function drawBars(level: number): void {
   if (!ctx) return
+
   const centerY = height / 2
-  ctx.beginPath()
-  ctx.moveTo(0, centerY)
-  ctx.lineTo(width, centerY)
-  ctx.strokeStyle = 'rgba(184, 198, 219, 0.18)'
-  ctx.lineWidth = 1
-  ctx.stroke()
+  const barStep = 6
+  const barCount = Math.max(24, Math.floor(width / barStep))
+  const activeLevel = props.isActive ? level : 0
+  const baseHeight = props.isActive ? height * 0.08 : height * 0.035
+  const peakHeight = props.isActive ? height * (0.22 + activeLevel * 0.58) : height * 0.08
+
+  ctx.lineCap = 'round'
+
+  for (let i = 0; i < barCount; i += 1) {
+    const x = ((i + 0.5) / barCount) * width
+    const normalized = i / Math.max(1, barCount - 1)
+    const envelope = Math.pow(Math.sin(normalized * Math.PI), 1.35)
+    const pulseA = Math.sin(normalized * 10.8 - phase * 1.9)
+    const pulseB = Math.sin(normalized * 24.0 + phase * 2.8)
+    const shimmer = Math.sin(normalized * 4.8 + phase * 0.65)
+    const turbulence = 0.58 + pulseA * 0.3 + pulseB * 0.12
+    const amplitude = baseHeight + peakHeight * envelope * clamp(turbulence, 0.18, 1)
+    const barHeight = clamp(amplitude, 2, height * 0.92)
+    const halfHeight = barHeight / 2
+
+    const alpha = props.isActive
+      ? clamp(0.22 + envelope * 0.34 + activeLevel * 0.28 + shimmer * 0.04, 0.18, 0.88)
+      : 0.16
+    const lineWidth = props.isActive && envelope > 0.55 ? 1.6 : 1.2
+
+    ctx.beginPath()
+    ctx.moveTo(x, centerY - halfHeight)
+    ctx.lineTo(x, centerY + halfHeight)
+    ctx.strokeStyle = `rgba(226, 234, 245, ${alpha.toFixed(3)})`
+    ctx.lineWidth = lineWidth
+    ctx.stroke()
+  }
 }
 
 function render(): void {
   if (!ctx) return
 
-  displayedLevel += ((props.isActive ? props.level : 0) - displayedLevel) * (props.isActive ? 0.22 : 0.08)
-  energy += ((props.isActive ? 0.55 + displayedLevel * 0.9 : 0.24) - energy) * 0.08
-  phase += props.isActive ? 0.05 + displayedLevel * 0.14 : 0.025
+  displayedLevel += ((props.isActive ? props.level : 0) - displayedLevel) * (props.isActive ? 0.26 : 0.1)
+  phase += props.isActive ? 0.08 + displayedLevel * 0.18 : 0.03
 
   ctx.clearRect(0, 0, width, height)
-  drawBaseline()
-
-  const speechLift = props.isActive ? 0.08 + displayedLevel * 0.75 : 0.03
-  const baseAmplitude = height * speechLift * energy
-
-  drawLine(
-    baseAmplitude * (0.65 + displayedLevel * 0.08),
-    0.8 + displayedLevel * 0.22,
-    0.26 + displayedLevel * 0.18,
-    1,
-    'rgba(163, 190, 224, 0.95)',
-    0.3,
-  )
-  drawLine(
-    baseAmplitude * (0.95 + displayedLevel * 0.28),
-    1.1 + displayedLevel * 0.42,
-    0.72 + displayedLevel * 0.2,
-    1.8 + displayedLevel * 0.65,
-    'rgba(230, 238, 249, 0.98)',
-    1.15,
-  )
+  drawBars(displayedLevel)
 
   frameId = requestAnimationFrame(render)
 }

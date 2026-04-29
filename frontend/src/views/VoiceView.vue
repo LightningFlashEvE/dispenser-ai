@@ -181,9 +181,7 @@ const normalizedState = computed<string>(() => {
   return 'idle'
 })
 const isActiveState = computed(() => ['listening', 'thinking', 'speaking', 'executing'].includes(normalizedState.value))
-const isDictationMode = computed(() =>
-  voiceStore.isRecording || ['listening', 'thinking'].includes(normalizedState.value),
-)
+const isDictationMode = computed(() => voiceStore.isRecording)
 const dictationTitle = computed(() => {
   if (voiceStore.asrPartial) return voiceStore.asrPartial
   if (voiceStore.isRecording) return '正在听写，请直接说出你的需求'
