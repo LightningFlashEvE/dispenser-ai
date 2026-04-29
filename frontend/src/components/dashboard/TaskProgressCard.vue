@@ -7,6 +7,7 @@ import Card from '@/components/ui/card/Card.vue'
 import Progress from '@/components/ui/progress/Progress.vue'
 import ConfirmActionDialog from '@/components/common/ConfirmActionDialog.vue'
 import type { Task } from '@/services/api'
+import { taskStatusDescriptor } from '@/lib/status'
 
 const props = defineProps<{
   task: Task | null
@@ -25,14 +26,7 @@ const progress = computed(() => {
   if (value.includes('ASK') || value.includes('CONFIRM')) return 35
   return props.task ? 12 : 0
 })
-const badgeVariant = computed(() => {
-  const value = status.value.toUpperCase()
-  if (value.includes('FAILED') || value.includes('ERROR')) return 'danger'
-  if (value.includes('CANCEL') || value.includes('IDLE')) return 'offline'
-  if (value.includes('COMPLETED')) return 'ok'
-  if (value.includes('CONFIRM') || value.includes('ASK')) return 'warn'
-  return 'info'
-})
+const statusDescriptor = computed(() => taskStatusDescriptor(status.value))
 </script>
 
 <template>
@@ -45,7 +39,7 @@ const badgeVariant = computed(() => {
           当前步骤：{{ task?.command_type || stateLabel || '待机' }}
         </div>
       </div>
-      <Badge :variant="badgeVariant">{{ status }}</Badge>
+      <Badge :variant="statusDescriptor.tone">{{ status }}</Badge>
     </div>
     <Progress class="mt-5" :model-value="progress" />
     <div class="mt-4 grid grid-cols-3 gap-2">

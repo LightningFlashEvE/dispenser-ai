@@ -17,6 +17,7 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 .npm/
+.playwright-cli/
 
 # 敏感配置（保留模板）
 backend/.env

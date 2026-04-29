@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import Badge from '@/components/ui/badge/Badge.vue'
+import { connectionStatusDescriptor } from '@/lib/status'
 
 const props = withDefaults(defineProps<{
   label: string
@@ -13,21 +14,12 @@ const props = withDefaults(defineProps<{
   error: false,
 })
 
-const variant = computed(() => {
-  if (props.error) return 'danger'
-  if (props.loading) return 'info'
-  return props.connected ? 'ok' : 'offline'
-})
-const text = computed(() => {
-  if (props.error) return '异常'
-  if (props.loading) return '连接中'
-  return props.connected ? '在线' : '离线'
-})
+const status = computed(() => connectionStatusDescriptor(props.connected, props.error, props.loading))
 </script>
 
 <template>
-  <Badge :variant="variant">
+  <Badge :variant="status.tone">
     <span class="mr-1 h-1.5 w-1.5 rounded-full" :class="connected ? 'bg-emerald-300' : 'bg-slate-400'" />
-    {{ label }} {{ text }}
+    {{ label }} {{ status.label }}
   </Badge>
 </template>

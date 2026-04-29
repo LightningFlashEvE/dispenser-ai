@@ -14,7 +14,9 @@
 - 新增 `tailwind.config.ts`、`postcss.config.js`、`components.json`。
 - `src/styles/theme.css` 引入 Tailwind layers，并定义 shadcn CSS variables，默认通过 `document.documentElement.classList.add('dark')` 使用 dark mode。
 - 新增 `src/lib/utils.ts`，提供 `cn()`，基于 `clsx` 与 `tailwind-merge`。
+- 新增 `src/lib/status.ts`，集中维护任务、连接、称重、资源状态的语义颜色映射。
 - 新增 `src/components/ui/*`，以 shadcn-vue 风格提供 Button、Card、Badge、Progress、Tabs、Dialog、AlertDialog、Sheet、Table、Input、Textarea、Select、Separator、ScrollArea、Tooltip、Sonner。
+- 新增 `src/components/common/*` 的 PageHeader、DataToolbar、EmptyState、ErrorState、LoadingState、MetricGrid 和统一导出入口，用于后续页面迁移。
 - Element Plus 暂时保留全局注册，旧页面继续使用，便于分阶段迁移。
 
 ## Element Plus 到 shadcn-vue 组件映射
@@ -38,6 +40,7 @@
 
 - `/dashboard`：新增现代 AI 工业控制台 POC。
 - 全局框架：`AppShell` + `SidebarNav` 已使用 Tailwind/shadcn-vue 风格。
+- 工程维护：已补充 ESLint 9 flat config、路由懒加载、Vite manualChunks、`.playwright-cli/` 忽略规则。
 
 ## 未重构页面列表
 
@@ -74,3 +77,4 @@
 - 系统资源接口没有温度字段，Dashboard 不展示假温度。
 - 旧页面仍使用 Element Plus，后续迁移时应逐页替换表格、表单和确认弹窗。
 - 建议下一步优先迁移日志报警页和配方管理页，因为它们包含高密度数据表和危险删除动作，适合验证 shadcn-vue 的 Table / AlertDialog / Toast 组合。
+- 如果继续压缩首屏包体，建议在迁移旧页面时同步拆分 Element Plus 依赖，并逐步移除全局 Element Plus 注册。

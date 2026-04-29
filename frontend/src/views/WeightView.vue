@@ -5,13 +5,10 @@ import WeightRealtimeCard from '@/components/dashboard/WeightRealtimeCard.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Card from '@/components/ui/card/Card.vue'
 import { useVoiceStore } from '@/stores/voice'
+import { balanceStatusDescriptor } from '@/lib/status'
 
 const voiceStore = useVoiceStore()
-const status = computed(() => {
-  if (voiceStore.balanceOverLimit) return { text: '异常 / 超限', variant: 'danger' as const }
-  if (voiceStore.balanceMg === null) return { text: '等待数据', variant: 'offline' as const }
-  return voiceStore.balanceStable ? { text: '稳定', variant: 'ok' as const } : { text: '波动', variant: 'warn' as const }
-})
+const status = computed(() => balanceStatusDescriptor(voiceStore.balanceMg, voiceStore.balanceStable, voiceStore.balanceOverLimit))
 </script>
 
 <template>
@@ -22,7 +19,7 @@ const status = computed(() => {
         <h1 class="mt-1 text-2xl font-semibold">实时称重</h1>
         <p class="mt-1 text-sm text-muted-foreground">复用现有 WebSocket 称重事件，不新增称重接口或设备控制逻辑。</p>
       </div>
-      <Badge :variant="status.variant">{{ status.text }}</Badge>
+      <Badge :variant="status.tone">{{ status.label }}</Badge>
     </header>
 
     <div class="grid grid-cols-1 gap-5 xl:grid-cols-[520px_1fr]">

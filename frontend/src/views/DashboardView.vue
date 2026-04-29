@@ -18,6 +18,7 @@ import Separator from '@/components/ui/separator/Separator.vue'
 import Tabs from '@/components/ui/tabs/Tabs.vue'
 import { deviceApi, systemApi, taskApi, type DeviceStatus, type SystemResources, type Task } from '@/services/api'
 import { useVoiceStore } from '@/stores/voice'
+import { resourceBarClass } from '@/lib/status'
 
 const voiceStore = useVoiceStore()
 const now = ref(new Date())
@@ -205,7 +206,7 @@ onUnmounted(() => {
                 <span class="font-semibold text-muted-foreground">{{ item.label }}</span>
                 <span class="font-mono">{{ item.value.toFixed(1) }}% · {{ item.detail }}</span>
               </div>
-              <Progress :model-value="item.value" :indicator-class="item.value > 85 ? 'bg-red-400' : item.value > 70 ? 'bg-amber-400' : 'bg-cyan-400'" />
+              <Progress :model-value="item.value" :indicator-class="resourceBarClass(item.value)" />
             </div>
             <div class="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <Thermometer class="h-4 w-4" />
