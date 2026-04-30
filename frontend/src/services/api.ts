@@ -61,6 +61,25 @@ export interface SystemResources {
 
 export interface DeviceStatus {
   device_status: string; balance_ready: boolean; current_command_id: string | null
+  current_weight_mg?: number | null
+  current_task?: {
+    command_id: string
+    command_type?: string | null
+    status?: string | null
+    accepted_at?: string | null
+    started_at?: string | null
+    completed_at?: string | null
+    step_count?: number
+  } | null
+  last_completed_task?: {
+    command_id: string
+    command_type?: string | null
+    status?: string | null
+    accepted_at?: string | null
+    started_at?: string | null
+    completed_at?: string | null
+    step_count?: number
+  } | null
   state_machine_state: string; current_task_id: string | null
 }
 

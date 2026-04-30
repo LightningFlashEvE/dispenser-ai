@@ -59,6 +59,15 @@ const backendOnline = computed(() => Boolean(deviceStatus.value) && !deviceError
 const currentTime = computed(() => now.value.toLocaleString('zh-CN', { hour12: false }))
 const taskStatus = computed(() => currentTask.value?.status ?? voiceStore.stateLabel)
 const aiHealth = computed(() => voiceStore.isConnected ? 'ASR / LLM / TTS 通道在线' : '语音 AI 通道离线')
+const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? null)
+const displayWeightStable = computed(() => {
+  if (voiceStore.balanceMg !== null) return voiceStore.balanceStable
+  return displayWeightMg.value !== null
+})
+const displayWeightOverLimit = computed(() => {
+  if (voiceStore.balanceMg !== null) return voiceStore.balanceOverLimit
+  return false
+})
 const resourceItems = computed(() => {
   if (!resources.value) return []
   return [
@@ -72,6 +81,7 @@ const deviceDetailRows = computed(() => [
   { label: '设备状态', value: deviceStatus.value?.device_status ?? '未知' },
   { label: '状态机', value: deviceStatus.value?.state_machine_state ?? '未知' },
   { label: '天平就绪', value: deviceStatus.value?.balance_ready ? '就绪' : '未就绪 / 未知' },
+  { label: '当前重量', value: deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined ? `${deviceStatus.value.current_weight_mg.toFixed(0)} mg` : '无' },
   { label: '当前任务', value: deviceStatus.value?.current_task_id ?? '无' },
   { label: '当前命令', value: deviceStatus.value?.current_command_id ?? '无' },
 ])
@@ -151,7 +161,7 @@ onUnmounted(() => {
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatusCard title="设备在线数量" :value="`${onlineDeviceCount}/6`" :detail="deviceStatus?.device_status || '等待设备状态'" :status="backendOnline ? 'ok' : 'offline'" :icon="Server" />
         <StatusCard title="当前任务状态" :value="taskStatus" :detail="currentTask?.task_id || '暂无任务 ID'" :status="currentTask ? 'info' : 'offline'" :icon="Gauge" />
-        <StatusCard title="当前称重" :value="voiceStore.balanceMg !== null ? voiceStore.balanceMg.toFixed(0) : '--'" detail="mg" :status="voiceStore.balanceOverLimit ? 'danger' : voiceStore.balanceStable ? 'ok' : 'warn'" :icon="Scale" />
+        <StatusCard title="当前称重" :value="displayWeightMg !== null ? displayWeightMg.toFixed(0) : '--'" detail="mg" :status="displayWeightOverLimit ? 'danger' : displayWeightStable ? 'ok' : 'warn'" :icon="Scale" />
         <StatusCard title="今日任务" :value="todayTasks" :detail="`${tasks.length} 条近期记录`" status="info" :icon="CheckCircle2" />
         <StatusCard title="报警数量" :value="alarms.length" :detail="alarms.length ? '需要人工确认' : '暂无报警'" :status="alarms.length ? 'danger' : 'ok'" :icon="AlertTriangle" />
         <StatusCard title="AI 服务" :value="voiceStore.isConnected ? '健康' : '离线'" :detail="aiHealth" :status="voiceStore.isConnected ? 'ok' : 'offline'" :icon="Bot" />
@@ -159,7 +169,7 @@ onUnmounted(() => {
 
       <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <TaskProgressCard :task="currentTask" :state-label="voiceStore.stateLabel" :can-cancel="voiceStore.isConnected && Boolean(currentTask)" @cancel="cancelCurrentTask" />
-        <WeightRealtimeCard :value-mg="voiceStore.balanceMg" :stable="voiceStore.balanceStable" :over-limit="voiceStore.balanceOverLimit" />
+        <WeightRealtimeCard :value-mg="displayWeightMg" :stable="displayWeightStable" :over-limit="displayWeightOverLimit" />
       </section>
 
       <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_420px]">
