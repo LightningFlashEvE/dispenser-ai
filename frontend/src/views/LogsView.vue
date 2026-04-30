@@ -1,78 +1,178 @@
-<template>
-  <div class="page">
-    <div class="page-header">
-      <div class="page-title-block">
-        <h1 class="page-title">操作日志</h1>
-        <span class="page-subtitle">{{ logs.length }} 条记录</span>
-      </div>
-      <div class="page-actions">
-        <el-select v-model="filterStatus" clearable placeholder="任务状态" style="width:130px">
-          <el-option label="执行中" value="EXECUTING" /><el-option label="完成" value="COMPLETED" />
-          <el-option label="失败" value="FAILED" /><el-option label="已取消" value="CANCELLED" />
-        </el-select>
-        <el-button @click="fetchLogs">刷新</el-button>
-      </div>
-    </div>
-    <div class="table-wrap wf-table-shell">
-      <el-table class="wf-data-table" v-loading="loading" :data="logs" stripe height="100%" style="width:100%">
-        <el-table-column prop="task_id" label="任务 ID" width="220" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" width="90" align="center">
-          <template #default="{ row }">
-            <span class="status-tag" :class="`status-${row.status?.toLowerCase()}`">{{ row.status }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="command_type" label="指令类型" width="100" />
-        <el-table-column prop="operator_id" label="操作员" width="90" />
-        <el-table-column prop="command_id" label="命令 ID" width="220" show-overflow-tooltip />
-        <el-table-column label="开始时间" width="160">
-          <template #default="{ row }">{{ row.started_at ? fmtDate(row.started_at) : '—' }}</template>
-        </el-table-column>
-        <el-table-column label="完成时间" width="160">
-          <template #default="{ row }">{{ row.completed_at ? fmtDate(row.completed_at) : '—' }}</template>
-        </el-table-column>
-        <el-table-column label="错误信息" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.error_message" class="text-error">{{ row.error_message }}</span>
-            <span v-else class="text-muted">—</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { AlertTriangle, CheckCircle2, RefreshCw, Search, XCircle } from 'lucide-vue-next'
+import { Badge, Button, Card, Input, Select, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui'
+import { EmptyState, ErrorState, LoadingState, MetricGrid, PageHeader } from '@/components/common'
 import { taskApi, type Task } from '@/services/api'
+import { taskStatusDescriptor, type StatusTone } from '@/lib/status'
+
 const logs = ref<Task[]>([])
 const loading = ref(false)
-const filterStatus = ref<string | null>(null)
-onMounted(() => fetchLogs())
+const error = ref<string | null>(null)
+const filterStatus = ref('ALL')
+const query = ref('')
+
+const statusOptions = [
+  { label: '全部状态', value: 'ALL' },
+  { label: '执行中', value: 'EXECUTING' },
+  { label: '完成', value: 'COMPLETED' },
+  { label: '失败', value: 'FAILED' },
+  { label: '已取消', value: 'CANCELLED' },
+]
+
+const filteredLogs = computed(() => {
+  const text = query.value.trim().toLowerCase()
+  if (!text) return logs.value
+  return logs.value.filter((item) =>
+    [
+      item.task_id,
+      item.command_id,
+      item.command_type,
+      item.operator_id,
+      item.status,
+      item.error_message,
+    ].some((value) => value?.toLowerCase().includes(text)),
+  )
+})
+
+const failedCount = computed(() => logs.value.filter((item) => taskStatusDescriptor(item.status).tone === 'danger').length)
+const completedCount = computed(() => logs.value.filter((item) => taskStatusDescriptor(item.status).tone === 'ok').length)
+const activeCount = computed(() => logs.value.filter((item) => taskStatusDescriptor(item.status).tone === 'info').length)
+
+onMounted(() => {
+  fetchLogs()
+})
+
 async function fetchLogs() {
   loading.value = true
-  try { logs.value = await taskApi.list({ status: filterStatus.value ?? undefined, limit: 200 }) }
-  catch (e) { console.error(e) }
-  finally { loading.value = false }
+  error.value = null
+  try {
+    logs.value = await taskApi.list({
+      status: filterStatus.value === 'ALL' ? undefined : filterStatus.value,
+      limit: 200,
+    })
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '日志加载失败'
+  } finally {
+    loading.value = false
+  }
 }
-function fmtDate(iso: string) {
+
+function onStatusChange(value: string) {
+  filterStatus.value = value
+  fetchLogs()
+}
+
+function statusTone(status: string): StatusTone {
+  return taskStatusDescriptor(status).tone
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return '-'
   const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+  if (Number.isNaN(d.getTime())) return '-'
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 </script>
 
-<style scoped>
-.page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.page-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--wf-border-dark); flex-shrink: 0; gap: 16px; }
-.page-title-block { display: flex; align-items: baseline; gap: 10px; }
-.page-title { font-size: 20px; font-weight: 600; color: var(--wf-text-main); }
-.page-subtitle { font-size: 13px; color: var(--wf-text-muted); }
-.page-actions { display: flex; align-items: center; gap: 8px; }
-.table-wrap { flex: 1; overflow: hidden; padding: 0 20px 20px; }
-.text-muted { color: var(--wf-text-muted); }
-.text-error { color: #ee1d36; font-size: 13px; }
-.status-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: rgba(255,255,255,0.06); color: var(--wf-text-soft); letter-spacing: 0.5px; }
-.status-completed { background: rgba(0, 215, 34, 0.12); color: #7ef6a1; }
-.status-failed    { background: rgba(238, 29, 54, 0.14); color: #ff8b9b; }
-.status-cancelled { background: rgba(255,255,255,0.06); color: var(--wf-text-muted); }
-.status-executing { background: rgba(122, 61, 255, 0.16); color: #b99bff; }
-</style>
+<template>
+  <div class="h-full overflow-y-auto bg-background p-5">
+    <PageHeader
+      eyebrow="Audit & Alarm"
+      title="日志报警"
+      description="读取现有任务接口，不修改后端日志、任务状态或设备控制流程。"
+    >
+      <template #actions>
+        <Button variant="outline" :disabled="loading" @click="fetchLogs">
+          <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
+          刷新
+        </Button>
+      </template>
+    </PageHeader>
+
+    <MetricGrid columns="auto" class="mb-5">
+      <Card class="p-4">
+        <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">近期任务</div>
+        <div class="mt-3 text-2xl font-semibold tabular-nums">{{ logs.length }}</div>
+      </Card>
+      <Card class="p-4">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">执行中</div>
+            <div class="mt-3 text-2xl font-semibold tabular-nums">{{ activeCount }}</div>
+          </div>
+          <Badge variant="info">running</Badge>
+        </div>
+      </Card>
+      <Card class="p-4">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">完成</div>
+            <div class="mt-3 text-2xl font-semibold tabular-nums">{{ completedCount }}</div>
+          </div>
+          <CheckCircle2 class="h-5 w-5 text-emerald-300" />
+        </div>
+      </Card>
+      <Card class="p-4">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">失败 / 报警</div>
+            <div class="mt-3 text-2xl font-semibold tabular-nums">{{ failedCount }}</div>
+          </div>
+          <AlertTriangle class="h-5 w-5 text-red-300" />
+        </div>
+      </Card>
+    </MetricGrid>
+
+    <Card class="p-4">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <div class="relative w-full min-w-56 max-w-sm">
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input v-model="query" class="pl-9" placeholder="搜索任务 ID / 命令 / 操作员 / 错误信息" />
+          </div>
+          <Select :model-value="filterStatus" :options="statusOptions" class="w-36" @update:model-value="onStatusChange" />
+        </div>
+        <Badge variant="secondary">{{ filteredLogs.length }} 条显示</Badge>
+      </div>
+
+      <ErrorState v-if="error" :message="error" retry-label="重新加载" @retry="fetchLogs" />
+      <LoadingState v-else-if="loading" :rows="8" />
+      <EmptyState v-else-if="filteredLogs.length === 0" title="暂无日志" description="当前筛选条件下没有任务记录。" />
+      <Table v-else>
+        <TableHeader>
+          <TableRow>
+            <TableHead class="min-w-52">任务 ID</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead>指令类型</TableHead>
+            <TableHead>操作员</TableHead>
+            <TableHead class="min-w-52">命令 ID</TableHead>
+            <TableHead>开始时间</TableHead>
+            <TableHead>完成时间</TableHead>
+            <TableHead class="min-w-64">错误信息</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="row in filteredLogs" :key="row.task_id">
+            <TableCell class="font-mono text-xs text-cyan-100">{{ row.task_id }}</TableCell>
+            <TableCell>
+              <Badge :variant="statusTone(row.status)">{{ row.status }}</Badge>
+            </TableCell>
+            <TableCell>{{ row.command_type || '-' }}</TableCell>
+            <TableCell>{{ row.operator_id || '-' }}</TableCell>
+            <TableCell class="font-mono text-xs text-muted-foreground">{{ row.command_id || '-' }}</TableCell>
+            <TableCell class="whitespace-nowrap text-muted-foreground">{{ fmtDate(row.started_at) }}</TableCell>
+            <TableCell class="whitespace-nowrap text-muted-foreground">{{ fmtDate(row.completed_at) }}</TableCell>
+            <TableCell>
+              <span v-if="row.error_message" class="inline-flex items-center gap-1 text-red-300">
+                <XCircle class="h-3.5 w-3.5" />
+                {{ row.error_message }}
+              </span>
+              <span v-else class="text-muted-foreground">-</span>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </Card>
+  </div>
+</template>

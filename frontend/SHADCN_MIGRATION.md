@@ -39,16 +39,16 @@
 ## 已重构页面列表
 
 - `/dashboard`：新增现代 AI 工业控制台 POC。
+- `/logs` 日志报警：已迁移为 shadcn-vue/Tailwind 表格、筛选、统计、加载态、错误态和空态，继续复用 `taskApi.list`。
+- `/weight` 实时称重：新增轻量页面，复用 WebSocket 称重数据和 ECharts 趋势卡片。
 - 全局框架：`AppShell` + `SidebarNav` 已使用 Tailwind/shadcn-vue 风格。
 - 工程维护：已补充 ESLint 9 flat config、路由懒加载、Vite manualChunks、`.playwright-cli/` 忽略规则。
 
 ## 未重构页面列表
 
 - `/voice` 任务执行 / 语音交互：保留原实现，保留原 WebSocket 与确认流程。
-- `/weight` 实时称重：新增轻量页面，复用 WebSocket 称重数据和 ECharts 趋势卡片。
 - `/inventory` 药品库存：保留旧 Element Plus 库存实现，导航名称已恢复为真实页面语义。
 - `/formulas` 配方管理：保留 Element Plus 表格、表单、删除确认。
-- `/logs` 日志报警：保留 Element Plus 表格。
 - `/vision` 视觉识别：保留旧实现。
 - `/status` 系统状态：保留旧系统状态页，但已从主导航隐藏；系统资源和设备状态已合并到 Dashboard。
 - `/settings` 系统设置：保留旧实现。
@@ -76,5 +76,5 @@
 - 设备子模块状态目前只有 `DeviceStatus` 的粗粒度字段，机械臂、摄像头、TTS、LLM 等细分状态仍需要后端显式字段后才能精确展示。
 - 系统资源接口没有温度字段，Dashboard 不展示假温度。
 - 旧页面仍使用 Element Plus，后续迁移时应逐页替换表格、表单和确认弹窗。
-- 建议下一步优先迁移日志报警页和配方管理页，因为它们包含高密度数据表和危险删除动作，适合验证 shadcn-vue 的 Table / AlertDialog / Toast 组合。
+- 建议下一步优先迁移配方管理页和药品库存页，因为它们包含高密度数据表和危险删除动作，适合验证 shadcn-vue 的 Table / AlertDialog / Toast 组合。
 - 如果继续压缩首屏包体，建议在迁移旧页面时同步拆分 Element Plus 依赖，并逐步移除全局 Element Plus 注册。
