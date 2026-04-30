@@ -62,10 +62,33 @@ mock-qt/
 {
   "device_status": "idle",
   "balance_ready": true,
+  "current_weight_mg": 0,
   "current_command_id": null,
+  "current_task": null,
+  "last_completed_task": null,
   "timestamp": "..."
 }
 ```
+
+### 查询任务列表
+
+**`GET /api/tasks`**
+
+返回 mock-qt 记录的任务历史，包含执行状态、接收时间、完成时间、错误信息和步骤结果。
+
+### 查询任务详情
+
+**`GET /api/tasks/{command_id}`**
+
+返回单个任务的完整详情，包括：
+- `accepted_at`
+- `started_at`
+- `completed_at`
+- `status`
+- `payload`
+- `result`
+- `error`
+- `steps`
 
 ---
 
@@ -78,7 +101,8 @@ mock-qt/
   "ai_callback_url": "http://localhost:8000/api/tasks/callback",
   "log_all_commands": true,
   "simulate_actual_mass": true,
-  "actual_mass_deviation_pct": 0.3
+  "actual_mass_deviation_pct": 0.3,
+  "default_weight_mg": 0
 }
 ```
 
@@ -89,6 +113,7 @@ mock-qt/
 | `ai_callback_url` | 回调 AI 层的地址 |
 | `simulate_actual_mass` | 是否模拟实际称量值（带随机偏差）|
 | `actual_mass_deviation_pct` | 实际质量相对目标质量的最大偏差百分比 |
+| `default_weight_mg` | 默认当前重量（mg），任务空闲时 `/api/status` 返回该值 |
 
 ---
 
@@ -113,6 +138,7 @@ python server.py --port 9000 --config config.json
 3. 按 `failure_rate` 概率随机决定成功/失败
 4. 生成回调数据（含模拟实际质量）
 5. POST 到 `ai_callback_url`
+6. 在本地任务历史中记录接收时间、开始时间、完成时间、状态、步骤和错误信息
 
 回调数据示例（dispense 成功）：
 ```json
@@ -150,4 +176,6 @@ python server.py --port 9000 --config config.json
 - Mock 服务**不做业务逻辑**，只做格式验证 + 模拟延迟 + 回调
 - 收到 `emergency_stop` 时立即取消所有待执行任务，同步返回，不延迟
 - 收到 `cancel` 时如果目标指令正在延迟中，取消该延迟并回调 `cancelled` 状态
+- `/api/status` 会返回当前重量、当前任务摘要、最近完成任务摘要
+- `/api/tasks` 和 `/api/tasks/{command_id}` 可用于前端或联调脚本查询任务执行详情
 - **仅用于开发联调，不得用于生产**

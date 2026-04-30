@@ -11,6 +11,7 @@
 
   "simulate_actual_mass": true,
   "actual_mass_deviation_pct": 0.3,
+  "default_weight_mg": 0,
 
   "log_all_commands": true,
 
