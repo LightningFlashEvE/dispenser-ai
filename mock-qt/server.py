@@ -51,13 +51,15 @@ def now_iso() -> str:
 DEFAULT_CONFIG: dict[str, Any] = {
     "port": 9000,
     "ai_callback_url": "http://localhost:8000/api/tasks/callback",
-    "execution_delay_ms": 2000,
+    "execution_delay_ms": 40000,
     "failure_rate": 0.05,
     "simulate_actual_mass": True,
     "actual_mass_deviation_pct": 0.3,
     "default_weight_mg": 0,
+    "idle_weight_min_mg": 0.0,
+    "idle_weight_max_mg": 1.5,
     "log_all_commands": True,
-    "simulate_formula_step_delay_ms": 1500,
+    "simulate_formula_step_delay_ms": 40000,
 }
 
 
@@ -145,6 +147,14 @@ def _simulate_actual_mass(target_mg: int) -> tuple[int, int]:
     dev = random.randint(-max_dev, max_dev)
     actual = target_mg + dev
     return actual, dev
+
+
+def _simulate_idle_weight_mg() -> float:
+    min_mg = float(CFG.get("idle_weight_min_mg", 0.0))
+    max_mg = float(CFG.get("idle_weight_max_mg", 1.5))
+    if max_mg < min_mg:
+        min_mg, max_mg = max_mg, min_mg
+    return round(random.uniform(min_mg, max_mg), 3)
 
 
 def _record_task(
@@ -601,7 +611,7 @@ async def _run_task(command_id: str, command_type: str, payload: dict) -> None:
             _device_state["status"] = "idle"
             _device_state["current_command_id"] = None
         if not _running_tasks:
-            _device_state["current_weight_mg"] = CFG.get("default_weight_mg", 0)
+            _device_state["current_weight_mg"] = _simulate_idle_weight_mg()
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +654,7 @@ async def receive_command(request: Request) -> JSONResponse:
             task.cancel()
         _device_state["status"] = "idle"
         _device_state["current_command_id"] = None
-        _device_state["current_weight_mg"] = CFG.get("default_weight_mg", 0)
+        _device_state["current_weight_mg"] = _simulate_idle_weight_mg()
         _record_task(
             command_id,
             command_type=command_type,
@@ -777,6 +787,8 @@ async def receive_command(request: Request) -> JSONResponse:
 
 @app.get("/api/status")
 async def get_status() -> JSONResponse:
+    if not _running_tasks and _device_state["status"] == "idle":
+        _device_state["current_weight_mg"] = _simulate_idle_weight_mg()
     current_record = _task_records.get(_device_state["current_command_id"]) if _device_state["current_command_id"] else None
     return JSONResponse(content={
         "device_status": _device_state["status"],
@@ -826,7 +838,7 @@ def main() -> None:
 
     global CFG
     CFG = load_config(args.config)
-    _device_state["current_weight_mg"] = CFG.get("default_weight_mg", 0)
+    _device_state["current_weight_mg"] = _simulate_idle_weight_mg()
 
     port = args.port if args.port is not None else CFG.get("port", 9000)
 

@@ -5,15 +5,17 @@
 
   "ai_callback_url": "http://localhost:8000/api/tasks/callback",
 
-  "execution_delay_ms": 2000,
+  "execution_delay_ms": 40000,
 
   "failure_rate": 0.05,
 
   "simulate_actual_mass": true,
   "actual_mass_deviation_pct": 0.3,
   "default_weight_mg": 0,
+  "idle_weight_min_mg": 0.0,
+  "idle_weight_max_mg": 1.5,
 
   "log_all_commands": true,
 
-  "simulate_formula_step_delay_ms": 1500
+  "simulate_formula_step_delay_ms": 40000
 }

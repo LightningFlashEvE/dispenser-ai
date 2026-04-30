@@ -73,29 +73,55 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { systemApi, deviceApi, type SystemResources, type DeviceStatus } from '@/services/api'
 import { Refresh } from '@element-plus/icons-vue'
 
 const resources = ref<SystemResources | null>(null)
 const deviceStatus = ref<DeviceStatus | null>(null)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let refreshInFlight = false
+let resourcesSnapshot = ''
+let deviceSnapshot = ''
 
 onMounted(() => { 
-  fetchResources()
-  fetchDevice() 
+  refreshAll()
+  refreshTimer = setInterval(refreshAll, 1000)
+})
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 
 async function fetchResources() { 
-  try { resources.value = await systemApi.resources() } catch { /* ignore */ } 
+  try {
+    const nextResources = await systemApi.resources()
+    const nextSnapshot = JSON.stringify(nextResources)
+    if (nextSnapshot !== resourcesSnapshot) {
+      resources.value = nextResources
+      resourcesSnapshot = nextSnapshot
+    }
+  } catch { /* ignore */ } 
 }
 
 async function fetchDevice() { 
-  try { deviceStatus.value = await deviceApi.status() } catch { /* ignore */ } 
+  try {
+    const nextDeviceStatus = await deviceApi.status()
+    const nextSnapshot = JSON.stringify(nextDeviceStatus)
+    if (nextSnapshot !== deviceSnapshot) {
+      deviceStatus.value = nextDeviceStatus
+      deviceSnapshot = nextSnapshot
+    }
+  } catch { /* ignore */ } 
 }
 
-function refreshAll() {
-  fetchResources()
-  fetchDevice()
+async function refreshAll() {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  try {
+    await Promise.all([fetchResources(), fetchDevice()])
+  } finally {
+    refreshInFlight = false
+  }
 }
 </script>
 

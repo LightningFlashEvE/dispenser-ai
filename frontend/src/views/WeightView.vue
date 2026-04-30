@@ -11,6 +11,13 @@ import { balanceStatusDescriptor } from '@/lib/status'
 const voiceStore = useVoiceStore()
 const deviceStatus = ref<DeviceStatus | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let refreshInFlight = false
+let deviceSnapshot = ''
+
+function formatWeightMg(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '--'
+  return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
+}
 
 const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? null)
 const displayWeightStable = computed(() => {
@@ -24,16 +31,25 @@ const displayWeightOverLimit = computed(() => {
 const status = computed(() => balanceStatusDescriptor(displayWeightMg.value, displayWeightStable.value, displayWeightOverLimit.value))
 
 async function fetchDevice() {
+  if (refreshInFlight) return
+  refreshInFlight = true
   try {
-    deviceStatus.value = await deviceApi.status()
+    const nextDeviceStatus = await deviceApi.status()
+    const nextSnapshot = JSON.stringify(nextDeviceStatus)
+    if (nextSnapshot !== deviceSnapshot) {
+      deviceStatus.value = nextDeviceStatus
+      deviceSnapshot = nextSnapshot
+    }
   } catch {
     // WeightView keeps its last known display and avoids replacing it with an error blank state.
+  } finally {
+    refreshInFlight = false
   }
 }
 
 onMounted(() => {
   fetchDevice()
-  refreshTimer = setInterval(fetchDevice, 5000)
+  refreshTimer = setInterval(fetchDevice, 1000)
 })
 
 onUnmounted(() => {
@@ -65,7 +81,7 @@ onUnmounted(() => {
         </div>
         <div class="space-y-3 text-sm text-muted-foreground">
           <div class="rounded-md border border-border bg-muted/30 p-3">
-            当前重量：<span class="font-mono text-foreground">{{ displayWeightMg !== null ? `${displayWeightMg.toFixed(0)} mg` : '暂无数据' }}</span>
+            当前重量：<span class="font-mono text-foreground">{{ displayWeightMg !== null ? `${formatWeightMg(displayWeightMg)} mg` : '暂无数据' }}</span>
           </div>
           <div class="rounded-md border border-border bg-muted/30 p-3">
             稳定状态：<span class="text-foreground">{{ displayWeightStable ? '稳定' : '未稳定 / 波动' }}</span>

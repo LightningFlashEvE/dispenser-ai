@@ -20,6 +20,11 @@ const status = computed(() => {
   return props.stable ? { text: '稳定', variant: 'ok' as const } : { text: '波动', variant: 'warn' as const }
 })
 
+function formatWeightMg(value: number | null): string {
+  if (value === null || value === undefined) return '--'
+  return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
+}
+
 function renderChart() {
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
@@ -55,7 +60,7 @@ onBeforeUnmount(() => {
       <div>
         <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">实时称重</div>
         <div class="mt-3 flex items-end gap-2">
-          <span class="text-3xl font-semibold tabular-nums">{{ valueMg !== null ? valueMg.toFixed(0) : '--' }}</span>
+          <span class="text-3xl font-semibold tabular-nums">{{ formatWeightMg(valueMg) }}</span>
           <span class="pb-1 text-sm text-muted-foreground">mg</span>
         </div>
       </div>

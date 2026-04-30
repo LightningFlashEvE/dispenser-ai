@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { AlertTriangle, CheckCircle2, RefreshCw, Search, XCircle } from 'lucide-vue-next'
 import { Badge, Button, Card, Input, Select, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui'
 import { EmptyState, ErrorState, LoadingState, MetricGrid, PageHeader } from '@/components/common'
@@ -11,6 +11,9 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const filterStatus = ref('ALL')
 const query = ref('')
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let refreshInFlight = false
+let logsSnapshot = ''
 
 const statusOptions = [
   { label: '全部状态', value: 'ALL' },
@@ -41,20 +44,32 @@ const activeCount = computed(() => logs.value.filter((item) => taskStatusDescrip
 
 onMounted(() => {
   fetchLogs()
+  refreshTimer = setInterval(() => { fetchLogs(true) }, 1000)
+})
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 
-async function fetchLogs() {
-  loading.value = true
-  error.value = null
+async function fetchLogs(silent = false) {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  if (!silent) loading.value = true
+  if (!silent) error.value = null
   try {
-    logs.value = await taskApi.list({
+    const nextLogs = await taskApi.list({
       status: filterStatus.value === 'ALL' ? undefined : filterStatus.value,
       limit: 200,
     })
+    const nextSnapshot = JSON.stringify(nextLogs)
+    if (nextSnapshot !== logsSnapshot) {
+      logs.value = nextLogs
+      logsSnapshot = nextSnapshot
+    }
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : '日志加载失败'
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
+    refreshInFlight = false
   }
 }
 

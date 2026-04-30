@@ -96,24 +96,30 @@ mock-qt/
 
 ```json
 {
-  "execution_delay_ms": 2000,
+  "execution_delay_ms": 40000,
   "failure_rate": 0.05,
   "ai_callback_url": "http://localhost:8000/api/tasks/callback",
   "log_all_commands": true,
   "simulate_actual_mass": true,
   "actual_mass_deviation_pct": 0.3,
-  "default_weight_mg": 0
+  "default_weight_mg": 0,
+  "idle_weight_min_mg": 0.0,
+  "idle_weight_max_mg": 1.5,
+  "simulate_formula_step_delay_ms": 40000
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
-| `execution_delay_ms` | 模拟执行耗时（ms），默认 2000ms |
+| `execution_delay_ms` | 普通任务模拟执行耗时（ms），默认 40000ms |
 | `failure_rate` | 模拟执行失败概率，0~1，默认 5% |
 | `ai_callback_url` | 回调 AI 层的地址 |
 | `simulate_actual_mass` | 是否模拟实际称量值（带随机偏差）|
 | `actual_mass_deviation_pct` | 实际质量相对目标质量的最大偏差百分比 |
 | `default_weight_mg` | 默认当前重量（mg），任务空闲时 `/api/status` 返回该值 |
+| `idle_weight_min_mg` | 空闲状态模拟重量下限（mg），默认 0.0 |
+| `idle_weight_max_mg` | 空闲状态模拟重量上限（mg），默认 1.5 |
+| `simulate_formula_step_delay_ms` | `formula` 每一步的模拟耗时（ms），默认 40000ms |
 
 ---
 
@@ -176,6 +182,6 @@ python server.py --port 9000 --config config.json
 - Mock 服务**不做业务逻辑**，只做格式验证 + 模拟延迟 + 回调
 - 收到 `emergency_stop` 时立即取消所有待执行任务，同步返回，不延迟
 - 收到 `cancel` 时如果目标指令正在延迟中，取消该延迟并回调 `cancelled` 状态
-- `/api/status` 会返回当前重量、当前任务摘要、最近完成任务摘要
+- `/api/status` 会返回当前重量、当前任务摘要、最近完成任务摘要；设备空闲时重量会在 `idle_weight_min_mg ~ idle_weight_max_mg` 之间浮动
 - `/api/tasks` 和 `/api/tasks/{command_id}` 可用于前端或联调脚本查询任务执行详情
 - **仅用于开发联调，不得用于生产**

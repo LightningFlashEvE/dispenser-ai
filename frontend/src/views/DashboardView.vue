@@ -32,12 +32,55 @@ const loading = ref(true)
 const activeLogTab = ref('logs')
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let refreshInFlight = false
+let deviceSnapshot = ''
+let resourcesSnapshot = ''
+let tasksSnapshot = ''
 
-const currentTask = computed(() =>
-  tasks.value.find((task) => ['EXECUTING', 'PROCESSING', 'PENDING', 'RUNNING'].includes(task.status?.toUpperCase())) ??
-  tasks.value[0] ??
-  null,
-)
+function formatWeightMg(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '--'
+  return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
+}
+
+function taskSummaryToTask(
+  summary: DeviceStatus['current_task'] | DeviceStatus['last_completed_task'],
+  fallbackTaskId?: string | null,
+): Task | null {
+  if (!summary) return null
+  return {
+    task_id: fallbackTaskId || summary.command_id,
+    command_id: summary.command_id,
+    command_type: summary.command_type || 'unknown',
+    operator_id: 'system',
+    status: summary.status || 'UNKNOWN',
+    error_message: null,
+    intent_json: null,
+    command_json: null,
+    result_json: null,
+    created_at: summary.accepted_at || summary.started_at || summary.completed_at || new Date().toISOString(),
+    started_at: summary.started_at || null,
+    completed_at: summary.completed_at || null,
+  }
+}
+
+const currentTask = computed(() => {
+  const currentTaskId = deviceStatus.value?.current_task_id
+  if (currentTaskId) {
+    const matchedTask = tasks.value.find((task) => task.task_id === currentTaskId)
+    if (matchedTask) return matchedTask
+  }
+
+  if (deviceStatus.value?.current_task) {
+    return taskSummaryToTask(deviceStatus.value.current_task, currentTaskId)
+  }
+
+  const executingTask = tasks.value.find((task) => ['EXECUTING', 'PROCESSING', 'PENDING', 'RUNNING', 'CONFIRMED'].includes(task.status?.toUpperCase()))
+  if (executingTask) return executingTask
+
+  if (tasks.value.length) return tasks.value[0]
+
+  return taskSummaryToTask(deviceStatus.value?.last_completed_task, deviceStatus.value?.last_completed_task?.command_id)
+})
 const alarms = computed(() =>
   tasks.value.filter((task) => {
     const status = task.status?.toUpperCase() ?? ''
@@ -58,6 +101,7 @@ const onlineDeviceCount = computed(() => {
 const backendOnline = computed(() => Boolean(deviceStatus.value) && !deviceError.value)
 const currentTime = computed(() => now.value.toLocaleString('zh-CN', { hour12: false }))
 const taskStatus = computed(() => currentTask.value?.status ?? voiceStore.stateLabel)
+const taskDetail = computed(() => currentTask.value?.task_id || currentTask.value?.command_type || deviceStatus.value?.current_command_id || '暂无任务 ID')
 const aiHealth = computed(() => voiceStore.isConnected ? 'ASR / LLM / TTS 通道在线' : '语音 AI 通道离线')
 const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? null)
 const displayWeightStable = computed(() => {
@@ -81,20 +125,31 @@ const deviceDetailRows = computed(() => [
   { label: '设备状态', value: deviceStatus.value?.device_status ?? '未知' },
   { label: '状态机', value: deviceStatus.value?.state_machine_state ?? '未知' },
   { label: '天平就绪', value: deviceStatus.value?.balance_ready ? '就绪' : '未就绪 / 未知' },
-  { label: '当前重量', value: deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined ? `${deviceStatus.value.current_weight_mg.toFixed(0)} mg` : '无' },
+  { label: '当前重量', value: deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined ? `${formatWeightMg(deviceStatus.value.current_weight_mg)} mg` : '无' },
   { label: '当前任务', value: deviceStatus.value?.current_task_id ?? '无' },
   { label: '当前命令', value: deviceStatus.value?.current_command_id ?? '无' },
 ])
 
-async function refreshDashboard() {
-  loading.value = true
-  await Promise.all([fetchDevice(), fetchResources(), fetchTasks()])
-  loading.value = false
+async function refreshDashboard(silent = false) {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  if (!silent) loading.value = true
+  try {
+    await Promise.all([fetchDevice(), fetchResources(), fetchTasks()])
+  } finally {
+    if (!silent) loading.value = false
+    refreshInFlight = false
+  }
 }
 
 async function fetchDevice() {
   try {
-    deviceStatus.value = await deviceApi.status()
+    const nextDeviceStatus = await deviceApi.status()
+    const nextSnapshot = JSON.stringify(nextDeviceStatus)
+    if (nextSnapshot !== deviceSnapshot) {
+      deviceStatus.value = nextDeviceStatus
+      deviceSnapshot = nextSnapshot
+    }
     deviceError.value = null
   } catch (error) {
     deviceError.value = error instanceof Error ? error.message : '设备状态接口不可用'
@@ -103,7 +158,12 @@ async function fetchDevice() {
 
 async function fetchResources() {
   try {
-    resources.value = await systemApi.resources()
+    const nextResources = await systemApi.resources()
+    const nextSnapshot = JSON.stringify(nextResources)
+    if (nextSnapshot !== resourcesSnapshot) {
+      resources.value = nextResources
+      resourcesSnapshot = nextSnapshot
+    }
     resourcesError.value = null
   } catch (error) {
     resourcesError.value = error instanceof Error ? error.message : '系统资源接口不可用'
@@ -112,7 +172,12 @@ async function fetchResources() {
 
 async function fetchTasks() {
   try {
-    tasks.value = await taskApi.list({ limit: 80 })
+    const nextTasks = await taskApi.list({ limit: 80 })
+    const nextSnapshot = JSON.stringify(nextTasks)
+    if (nextSnapshot !== tasksSnapshot) {
+      tasks.value = nextTasks
+      tasksSnapshot = nextSnapshot
+    }
     tasksError.value = null
   } catch (error) {
     tasksError.value = error instanceof Error ? error.message : '任务接口不可用'
@@ -127,7 +192,7 @@ function cancelCurrentTask() {
 onMounted(() => {
   refreshDashboard()
   clockTimer = setInterval(() => { now.value = new Date() }, 1000)
-  refreshTimer = setInterval(() => { refreshDashboard() }, 15000)
+  refreshTimer = setInterval(() => { refreshDashboard(true) }, 1000)
 })
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
@@ -160,8 +225,8 @@ onUnmounted(() => {
     <main class="space-y-5 p-5">
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatusCard title="设备在线数量" :value="`${onlineDeviceCount}/6`" :detail="deviceStatus?.device_status || '等待设备状态'" :status="backendOnline ? 'ok' : 'offline'" :icon="Server" />
-        <StatusCard title="当前任务状态" :value="taskStatus" :detail="currentTask?.task_id || '暂无任务 ID'" :status="currentTask ? 'info' : 'offline'" :icon="Gauge" />
-        <StatusCard title="当前称重" :value="displayWeightMg !== null ? displayWeightMg.toFixed(0) : '--'" detail="mg" :status="displayWeightOverLimit ? 'danger' : displayWeightStable ? 'ok' : 'warn'" :icon="Scale" />
+        <StatusCard title="当前任务状态" :value="taskStatus" :detail="taskDetail" :status="currentTask ? 'info' : 'offline'" :icon="Gauge" />
+        <StatusCard title="当前称重" :value="formatWeightMg(displayWeightMg)" detail="mg" :status="displayWeightOverLimit ? 'danger' : displayWeightStable ? 'ok' : 'warn'" :icon="Scale" />
         <StatusCard title="今日任务" :value="todayTasks" :detail="`${tasks.length} 条近期记录`" status="info" :icon="CheckCircle2" />
         <StatusCard title="报警数量" :value="alarms.length" :detail="alarms.length ? '需要人工确认' : '暂无报警'" :status="alarms.length ? 'danger' : 'ok'" :icon="AlertTriangle" />
         <StatusCard title="AI 服务" :value="voiceStore.isConnected ? '健康' : '离线'" :detail="aiHealth" :status="voiceStore.isConnected ? 'ok' : 'offline'" :icon="Bot" />
