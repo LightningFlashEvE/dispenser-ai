@@ -14,6 +14,8 @@ DEFAULT_FORMULA_NAMES = ["生理盐水", "缓冲液", "复合维生素溶液"]
 DEFAULT_DEVICE_NAMES = ["天平", "机械臂", "摄像头", "工位", "料仓"]
 DEFAULT_ACTION_WORDS = [
     "称取",
+    "称量",
+    "称重",
     "加入",
     "添加",
     "启动",

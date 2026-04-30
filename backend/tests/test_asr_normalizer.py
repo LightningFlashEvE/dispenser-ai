@@ -67,6 +67,31 @@ class TestFixedReplacements:
         r = normalize_asr_text("nacl", _get_lexicon())
         assert r["normalized_text"] == "氯化钠"
 
+    def test_cheng_liang(self):
+        """成量 -> 称量"""
+        r = normalize_asr_text("成量", _get_lexicon())
+        assert r["normalized_text"] == "称量"
+
+    def test_chan_liang(self):
+        """产量 -> 称量"""
+        r = normalize_asr_text("产量", _get_lexicon())
+        assert r["normalized_text"] == "称量"
+
+    def test_cheng_zhong(self):
+        """成众 -> 称重"""
+        r = normalize_asr_text("成众", _get_lexicon())
+        assert r["normalized_text"] == "称重"
+
+    def test_cheng_zhong2(self):
+        """城重 -> 称重"""
+        r = normalize_asr_text("城重", _get_lexicon())
+        assert r["normalized_text"] == "称重"
+
+    def test_cheng_qu2(self):
+        """成取 -> 称取"""
+        r = normalize_asr_text("成取", _get_lexicon())
+        assert r["normalized_text"] == "称取"
+
 
 class TestNumberNormalization:
     """中文数字与单位归一化测试"""
