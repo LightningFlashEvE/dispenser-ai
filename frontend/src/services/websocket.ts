@@ -19,11 +19,26 @@ export interface PendingPayload {
 export interface SlotFillingPayload { missing_slots: string[]; question: string }
 export interface CommandResultPayload { command_id: string; status: string; message?: string }
 
+export interface Correction {
+  from: string
+  to: string
+  type: string
+  confidence: number
+  reason: string
+}
+
+export interface Suggestion {
+  text: string
+  candidate: string
+  confidence: number
+  reason: string
+}
+
 export type InboundMsg =
   | { type: 'connected'; client_id: string; timestamp: string }
   | { type: 'state.update'; state: SessionState }
   | { type: 'asr.partial'; text: string }
-  | { type: 'asr.final'; text: string; duration_ms?: number }
+  | { type: 'asr.final'; text: string; duration_ms?: number; raw_text?: string; normalized_text?: string; corrections?: Correction[]; suggestions?: Suggestion[]; needs_confirmation?: boolean }
   | { type: 'chat.delta'; text: string; seq: number }
   | { type: 'chat.done'; text: string }
   | { type: 'tts.chunk'; data: string; sample_rate: number; format: string; seq: number; text?: string }

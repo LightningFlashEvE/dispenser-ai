@@ -1,13 +1,22 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { VoiceWebSocket, type InboundMsg, type SessionState, type PendingPayload } from '@/services/websocket'
+import { VoiceWebSocket, type InboundMsg, type SessionState, type PendingPayload, type Correction, type Suggestion } from '@/services/websocket'
 import { AudioRecorder, AudioPlayer, type MicError } from '@/services/audio'
 
 export type MsgRole = 'user' | 'assistant' | 'system'
 
+export interface AsrMeta {
+  rawText: string
+  normalizedText: string
+  corrections: Correction[]
+  suggestions: Suggestion[]
+  needsConfirmation: boolean
+}
+
 export interface ChatMessage {
   id: string; role: MsgRole; text: string; timestamp: string
   isStreaming?: boolean; isError?: boolean
+  asrMeta?: AsrMeta
 }
 
 export const useVoiceStore = defineStore('voice', () => {
@@ -17,6 +26,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const pendingIntent = ref<PendingPayload | null>(null)
   const isConnected = ref(false)
   const errorMsg = ref<string | null>(null)
+  const asrMeta = ref<AsrMeta | null>(null)
   const balanceMg = ref<number | null>(null)
   const balanceStable = ref(false)
   const balanceOverLimit = ref(false)
@@ -156,8 +166,20 @@ export const useVoiceStore = defineStore('voice', () => {
       case 'asr.partial': asrPartial.value = msg.text; break
       case 'asr.final':
         asrPartial.value = ''
+        // 提取 ASR 纠错元数据（新后端返回）
+        if (msg.raw_text && msg.normalized_text) {
+          asrMeta.value = {
+            rawText: msg.raw_text,
+            normalizedText: msg.normalized_text,
+            corrections: msg.corrections || [],
+            suggestions: msg.suggestions || [],
+            needsConfirmation: msg.needs_confirmation || false,
+          }
+        } else {
+          asrMeta.value = null
+        }
         if (!messages.value.some((m) => m.role === 'user' && m.text === msg.text))
-          _addMsg('user', msg.text)
+          _addMsg('user', msg.text, undefined, false, asrMeta.value ?? undefined)
         break
       case 'user_message':
         if (!messages.value.some((m) => m.role === 'user' && m.text === msg.text))
@@ -213,10 +235,11 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
-  function _addMsg(role: MsgRole, text: string, timestamp?: string, isError = false): void {
+  function _addMsg(role: MsgRole, text: string, timestamp?: string, isError = false, meta?: AsrMeta): void {
     messages.value.push({
       id: `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role, text, timestamp: timestamp ?? new Date().toISOString(), isError,
+      asrMeta: meta,
     })
   }
 

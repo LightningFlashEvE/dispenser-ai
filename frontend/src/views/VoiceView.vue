@@ -74,6 +74,29 @@
         <template v-if="msg.role === 'user'">
           <div class="msg-bubble msg-bubble--user">
             <div class="msg-text">{{ msg.text }}</div>
+            <!-- ASR 纠错详情（仅语音输入且存在纠错时显示） -->
+            <div v-if="msg.asrMeta && msg.asrMeta.needsConfirmation" class="asr-meta">
+              <div class="asr-meta-divider" />
+              <div class="asr-raw">识别原文：{{ msg.asrMeta.rawText }}</div>
+              <div v-if="msg.asrMeta.corrections.length" class="asr-corrections">
+                <div class="asr-section-title">自动纠正</div>
+                <div v-for="(c, i) in msg.asrMeta.corrections" :key="i" class="asr-correction-item">
+                  <span class="asr-from">{{ c.from }}</span>
+                  <span class="asr-arrow">→</span>
+                  <span class="asr-to">{{ c.to }}</span>
+                </div>
+              </div>
+              <div v-if="msg.asrMeta.suggestions.length" class="asr-suggestions">
+                <div class="asr-section-title">疑似词汇</div>
+                <div v-for="(s, i) in msg.asrMeta.suggestions" :key="i" class="asr-suggestion-item">
+                  <span class="asr-sug-text">{{ s.text }}</span>
+                  <span class="asr-arrow">→</span>
+                  <span class="asr-sug-candidate">{{ s.candidate }}</span>
+                  <span class="asr-sug-confidence">{{ (s.confidence * 100).toFixed(0) }}%</span>
+                </div>
+              </div>
+              <div class="asr-hint">已根据药品/配方热词库自动纠正，请确认后再执行。</div>
+            </div>
             <div class="msg-time">{{ fmtTime(msg.timestamp) }}</div>
           </div>
         </template>
@@ -392,6 +415,19 @@ function fmtTime(iso: string) {
 .composer-swap-leave-to { opacity: 0; }
 .voice-btn--disabled { opacity: 0.5; cursor: not-allowed; background: var(--wf-gray-300); }
 .audio-btn-icon { font-size: 22px; }
+
+.asr-meta { margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.25); font-size: 12.5px; }
+.asr-meta-divider { display: none; }
+.asr-raw { color: rgba(255,255,255,0.75); margin-bottom: 6px; }
+.asr-section-title { color: rgba(255,255,255,0.6); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 6px 0 4px; }
+.asr-correction-item, .asr-suggestion-item { display: flex; align-items: center; gap: 4px; margin: 2px 0; flex-wrap: wrap; }
+.asr-from { color: #ffd6d6; text-decoration: line-through; }
+.asr-to { color: #c8ffd8; font-weight: 600; }
+.asr-sug-text { color: #fff3cd; }
+.asr-sug-candidate { color: #d4edda; font-weight: 600; }
+.asr-sug-confidence { color: rgba(255,255,255,0.5); font-size: 11px; }
+.asr-arrow { color: rgba(255,255,255,0.5); font-size: 11px; }
+.asr-hint { margin-top: 6px; color: #ffe0b2; font-size: 11.5px; font-weight: 500; }
 
 @media (max-width: 900px) {
   .input-area { padding: 12px 16px 20px; gap: 10px; }

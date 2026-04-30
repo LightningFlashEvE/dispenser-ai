@@ -51,6 +51,8 @@ from app.core.logging import get_logger
 from app.services.ai.llm import get_llm_async
 from app.services.ai.stt import AudioSession, get_whisper_client
 from app.services.ai.tts import get_tts_client
+from app.services.asr.lexicon import DomainLexicon
+from app.services.asr.normalizer import normalize_asr_text
 from app.services.dialog.dispatcher import (
     DispatchResult,
     IntentDispatcher,
@@ -467,6 +469,13 @@ async def voice_websocket(websocket: WebSocket) -> None:
     )
     whisper_client = get_whisper_client()
 
+    # ── ASR 领域热词库（本地离线，不依赖云端） ───────────────────────
+    lexicon = DomainLexicon()
+    try:
+        await lexicon.load_from_db()
+    except Exception:
+        logger.exception("[%s] 热词库数据库加载失败，使用默认词表", client_id)
+
     session = Session(
         session_id=session_id,
         history_max_messages=settings.dialog_history_max_messages,
@@ -626,8 +635,8 @@ async def voice_websocket(websocket: WebSocket) -> None:
                     )
                     continue
 
-                user_text = transcribe_result.text
-                if not user_text or not user_text.strip():
+                raw_text = transcribe_result.text
+                if not raw_text or not raw_text.strip():
                     session.transition_to("idle")
                     await ws_manager.send_json(
                         client_id,
@@ -638,16 +647,38 @@ async def voice_websocket(websocket: WebSocket) -> None:
                     )
                     continue
 
-                logger.info("ASR 转写完成: %s", user_text)
+                # ── ASR 后处理：领域热词纠错与归一化 ─────────────────────
+                asr_result = normalize_asr_text(raw_text, lexicon)
+                normalized_text = asr_result["normalized_text"]
+                corrections = asr_result["corrections"]
+                suggestions = asr_result["suggestions"]
+                needs_confirmation = asr_result["needs_confirmation"]
+
+                logger.info(
+                    "[%s] ASR 转写完成: raw=%s normalized=%s corrections=%d suggestions=%d",
+                    client_id, raw_text, normalized_text,
+                    len(corrections), len(suggestions),
+                )
+
+                # 向后兼容：旧前端只读取 text；新前端可读取 raw_text / normalized_text
                 await ws_manager.send_json(
                     client_id,
-                    {"type": "asr.final", "text": user_text, "duration_ms": duration_ms},
+                    {
+                        "type": "asr.final",
+                        "text": normalized_text,
+                        "raw_text": raw_text,
+                        "normalized_text": normalized_text,
+                        "corrections": corrections,
+                        "suggestions": suggestions,
+                        "needs_confirmation": needs_confirmation,
+                        "duration_ms": duration_ms,
+                    },
                 )
                 await ws_manager.send_json(
                     client_id,
-                    {"type": "user_message", "text": user_text, "timestamp": _now_iso()},
+                    {"type": "user_message", "text": normalized_text, "timestamp": _now_iso()},
                 )
-                await _process_text_input(dispatcher, session, client_id, user_text)
+                await _process_text_input(dispatcher, session, client_id, normalized_text)
                 continue
 
             # ── chat.user_text（新）或 transcript（旧）──────────────
