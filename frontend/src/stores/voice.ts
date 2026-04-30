@@ -20,6 +20,9 @@ export const useVoiceStore = defineStore('voice', () => {
   const balanceMg = ref<number | null>(null)
   const balanceStable = ref(false)
   const balanceOverLimit = ref(false)
+  const balanceLatestMg = ref<number | null>(null)
+  const balanceLatestStable = ref(false)
+  const balanceLatestOverLimit = ref(false)
   const audioInited = ref(false)
   const audioError = ref<string | null>(null)
   const micError = ref<MicError | null>(null)
@@ -31,8 +34,20 @@ export const useVoiceStore = defineStore('voice', () => {
   const _recorder = new AudioRecorder()
   const _player = new AudioPlayer()
   let _streamingId: string | null = null
+  let _balanceFlushTimer: ReturnType<typeof setInterval> | null = null
 
   const isPlaying = computed(() => _player.isPlaying)
+
+  function _flushBalanceDisplay(): void {
+    balanceMg.value = balanceLatestMg.value
+    balanceStable.value = balanceLatestStable.value
+    balanceOverLimit.value = balanceLatestOverLimit.value
+  }
+
+  function _ensureBalanceFlushTimer(): void {
+    if (_balanceFlushTimer) return
+    _balanceFlushTimer = setInterval(_flushBalanceDisplay, 500)
+  }
 
   const stateLabel = computed<string>(() => {
     const map: Record<string, string> = {
@@ -66,6 +81,10 @@ export const useVoiceStore = defineStore('voice', () => {
     isRecording.value = false
     micLevel.value = 0
     _player.dispose()
+    if (_balanceFlushTimer) {
+      clearInterval(_balanceFlushTimer)
+      _balanceFlushTimer = null
+    }
   }
 
   function switchSession(sessionId: string): void {
@@ -149,8 +168,19 @@ export const useVoiceStore = defineStore('voice', () => {
         break
       }
       case 'balance_reading':
-        balanceMg.value = msg.value_mg; balanceStable.value = msg.stable; balanceOverLimit.value = false; break
-      case 'balance_over_limit': balanceMg.value = msg.value_mg; balanceOverLimit.value = true; break
+        balanceLatestMg.value = msg.value_mg
+        balanceLatestStable.value = msg.stable
+        balanceLatestOverLimit.value = false
+        if (balanceMg.value === null) _flushBalanceDisplay()
+        _ensureBalanceFlushTimer()
+        break
+      case 'balance_over_limit':
+        balanceLatestMg.value = msg.value_mg
+        balanceLatestStable.value = false
+        balanceLatestOverLimit.value = true
+        if (balanceMg.value === null) _flushBalanceDisplay()
+        _ensureBalanceFlushTimer()
+        break
       case 'error':
         errorMsg.value = msg.message; setTimeout(() => { errorMsg.value = null }, 5000); break
       case 'ping': break
