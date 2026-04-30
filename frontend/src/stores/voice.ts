@@ -34,7 +34,8 @@ export const useVoiceStore = defineStore('voice', () => {
   const _recorder = new AudioRecorder()
   const _player = new AudioPlayer()
   let _streamingId: string | null = null
-  let _balanceFlushTimer: ReturnType<typeof setInterval> | null = null
+  let _balanceFlushTimer: ReturnType<typeof setTimeout> | null = null
+  let _balanceCooldownUntil = 0
 
   const isPlaying = computed(() => _player.isPlaying)
 
@@ -44,9 +45,35 @@ export const useVoiceStore = defineStore('voice', () => {
     balanceOverLimit.value = balanceLatestOverLimit.value
   }
 
-  function _ensureBalanceFlushTimer(): void {
+  function _scheduleBalanceFlush(): void {
+    const now = Date.now()
+    if (now >= _balanceCooldownUntil) {
+      _flushBalanceDisplay()
+      _balanceCooldownUntil = now + 500
+      if (_balanceFlushTimer) {
+        clearTimeout(_balanceFlushTimer)
+        _balanceFlushTimer = null
+      }
+      _balanceFlushTimer = setTimeout(() => {
+        _balanceFlushTimer = null
+        if (
+          balanceMg.value !== balanceLatestMg.value ||
+          balanceStable.value !== balanceLatestStable.value ||
+          balanceOverLimit.value !== balanceLatestOverLimit.value
+        ) {
+          _flushBalanceDisplay()
+          _balanceCooldownUntil = Date.now() + 500
+        }
+      }, 500)
+      return
+    }
+
     if (_balanceFlushTimer) return
-    _balanceFlushTimer = setInterval(_flushBalanceDisplay, 500)
+    _balanceFlushTimer = setTimeout(() => {
+      _balanceFlushTimer = null
+      _flushBalanceDisplay()
+      _balanceCooldownUntil = Date.now() + 500
+    }, Math.max(0, _balanceCooldownUntil - now))
   }
 
   const stateLabel = computed<string>(() => {
@@ -82,9 +109,10 @@ export const useVoiceStore = defineStore('voice', () => {
     micLevel.value = 0
     _player.dispose()
     if (_balanceFlushTimer) {
-      clearInterval(_balanceFlushTimer)
+      clearTimeout(_balanceFlushTimer)
       _balanceFlushTimer = null
     }
+    _balanceCooldownUntil = 0
   }
 
   function switchSession(sessionId: string): void {
@@ -171,15 +199,13 @@ export const useVoiceStore = defineStore('voice', () => {
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = msg.stable
         balanceLatestOverLimit.value = false
-        if (balanceMg.value === null) _flushBalanceDisplay()
-        _ensureBalanceFlushTimer()
+        _scheduleBalanceFlush()
         break
       case 'balance_over_limit':
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = false
         balanceLatestOverLimit.value = true
-        if (balanceMg.value === null) _flushBalanceDisplay()
-        _ensureBalanceFlushTimer()
+        _scheduleBalanceFlush()
         break
       case 'error':
         errorMsg.value = msg.message; setTimeout(() => { errorMsg.value = null }, 5000); break
