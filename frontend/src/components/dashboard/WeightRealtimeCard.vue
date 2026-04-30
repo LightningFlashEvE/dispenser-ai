@@ -25,6 +25,11 @@ function formatWeightMg(value: number | null): string {
   return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
 }
 
+function formatPointTime(date: Date): string {
+  const base = date.toLocaleTimeString('zh-CN', { hour12: false, minute: '2-digit', second: '2-digit' })
+  return `${base}.${Math.floor(date.getMilliseconds() / 100)}`
+}
+
 function renderChart() {
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
@@ -39,8 +44,8 @@ function renderChart() {
 
 watch(() => props.valueMg, (value) => {
   if (value === null || value === undefined) return
-  points.value.push({ time: new Date().toLocaleTimeString('zh-CN', { hour12: false, minute: '2-digit', second: '2-digit' }), value })
-  points.value = points.value.slice(-24)
+  points.value.push({ time: formatPointTime(new Date()), value })
+  points.value = points.value.slice(-300)
   renderChart()
 })
 

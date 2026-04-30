@@ -64,10 +64,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:  # noqa: BLE001
         logger.warning("TTS 预热失败（服务继续）: %s", e)
 
+    try:
+        from app.services.device.weight_stream import start_weight_stream
+
+        await start_weight_stream()
+        logger.info("重量流订阅已启动")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("重量流订阅启动失败（服务继续）: %s", e)
+
     yield
 
     from app.services.ai.llm import get_llm
     from app.services.device.control_client import get_control_client
+    from app.services.device.weight_stream import stop_weight_stream
+
+    try:
+        await stop_weight_stream()
+        logger.info("重量流订阅已关闭")
+    except Exception:  # noqa: BLE001
+        logger.exception("关闭重量流订阅异常")
 
     try:
         await get_llm().close()

@@ -10,6 +10,7 @@ import { balanceStatusDescriptor } from '@/lib/status'
 
 const voiceStore = useVoiceStore()
 const deviceStatus = ref<DeviceStatus | null>(null)
+const lastKnownWeightMg = ref<number | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let refreshInFlight = false
 let deviceSnapshot = ''
@@ -19,7 +20,7 @@ function formatWeightMg(value: number | null | undefined): string {
   return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
 }
 
-const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? null)
+const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? lastKnownWeightMg.value ?? null)
 const displayWeightStable = computed(() => {
   if (voiceStore.balanceMg !== null) return voiceStore.balanceStable
   return displayWeightMg.value !== null
@@ -35,6 +36,11 @@ async function fetchDevice() {
   refreshInFlight = true
   try {
     const nextDeviceStatus = await deviceApi.status()
+    if (nextDeviceStatus.current_weight_mg !== null && nextDeviceStatus.current_weight_mg !== undefined) {
+      lastKnownWeightMg.value = nextDeviceStatus.current_weight_mg
+    } else if (lastKnownWeightMg.value !== null) {
+      nextDeviceStatus.current_weight_mg = lastKnownWeightMg.value
+    }
     const nextSnapshot = JSON.stringify(nextDeviceStatus)
     if (nextSnapshot !== deviceSnapshot) {
       deviceStatus.value = nextDeviceStatus

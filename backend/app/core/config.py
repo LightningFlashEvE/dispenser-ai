@@ -122,6 +122,10 @@ class Settings(BaseSettings):
         return f"http://{self.control_adapter_host}:{self.control_adapter_port}"
 
     @property
+    def control_adapter_ws_url(self) -> str:
+        return f"ws://{self.control_adapter_host}:{self.control_adapter_port}"
+
+    @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 

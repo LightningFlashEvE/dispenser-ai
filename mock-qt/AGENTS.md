@@ -70,6 +70,21 @@ mock-qt/
 }
 ```
 
+### 重量实时流
+
+**`WS /ws/weight`**
+
+服务会持续推送重量事件，供 backend 订阅并转发到前端：
+
+```json
+{
+  "type": "weight",
+  "value_mg": 0.842,
+  "stable": false,
+  "timestamp": "2026-04-30T10:30:00.150+08:00"
+}
+```
+
 ### 查询任务列表
 
 **`GET /api/tasks`**
@@ -183,5 +198,6 @@ python server.py --port 9000 --config config.json
 - 收到 `emergency_stop` 时立即取消所有待执行任务，同步返回，不延迟
 - 收到 `cancel` 时如果目标指令正在延迟中，取消该延迟并回调 `cancelled` 状态
 - `/api/status` 会返回当前重量、当前任务摘要、最近完成任务摘要；设备空闲时重量会在 `idle_weight_min_mg ~ idle_weight_max_mg` 之间浮动
+- `WS /ws/weight` 会持续推送重量变化，backend 可订阅后再广播给前端
 - `/api/tasks` 和 `/api/tasks/{command_id}` 可用于前端或联调脚本查询任务执行详情
 - **仅用于开发联调，不得用于生产**

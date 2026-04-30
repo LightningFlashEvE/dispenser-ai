@@ -761,7 +761,7 @@ async def _heartbeat_loop(client_id: str) -> None:
 
 # ─── 天平广播（由 balance 驱动层调用）────────────────────────────
 
-async def push_balance(mass_mg: int, stable: bool) -> None:
+async def push_balance(mass_mg: float, stable: bool) -> None:
     await ws_manager.broadcast(
         {
             "type": "balance_reading",
@@ -772,7 +772,7 @@ async def push_balance(mass_mg: int, stable: bool) -> None:
     )
 
 
-async def push_balance_over_limit(mass_mg: int) -> None:
+async def push_balance_over_limit(mass_mg: float) -> None:
     await ws_manager.broadcast(
         {
             "type": "balance_over_limit",

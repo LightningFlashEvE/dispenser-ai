@@ -17,6 +17,7 @@ aiosqlite~=0.21             # SQLite 异步驱动（配合 SQLAlchemy async）
 
 # ── HTTP 客户端（调用 llama.cpp server、回调 C++）─────────────────────
 httpx~=0.28
+websockets~=15.0
 
 # ── 天平串口通信 ─────────────────────────────────────────────
 pyserial~=3.5

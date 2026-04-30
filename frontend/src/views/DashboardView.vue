@@ -36,6 +36,7 @@ let refreshInFlight = false
 let deviceSnapshot = ''
 let resourcesSnapshot = ''
 let tasksSnapshot = ''
+const lastKnownWeightMg = ref<number | null>(null)
 
 function formatWeightMg(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
@@ -103,7 +104,7 @@ const currentTime = computed(() => now.value.toLocaleString('zh-CN', { hour12: f
 const taskStatus = computed(() => currentTask.value?.status ?? voiceStore.stateLabel)
 const taskDetail = computed(() => currentTask.value?.task_id || currentTask.value?.command_type || deviceStatus.value?.current_command_id || '暂无任务 ID')
 const aiHealth = computed(() => voiceStore.isConnected ? 'ASR / LLM / TTS 通道在线' : '语音 AI 通道离线')
-const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? null)
+const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? lastKnownWeightMg.value ?? null)
 const displayWeightStable = computed(() => {
   if (voiceStore.balanceMg !== null) return voiceStore.balanceStable
   return displayWeightMg.value !== null
@@ -121,15 +122,6 @@ const resourceItems = computed(() => {
     { label: '磁盘', value: resources.value.disk.percent, detail: `${resources.value.disk.used_gb.toFixed(1)} / ${resources.value.disk.total_gb.toFixed(1)} GB` },
   ]
 })
-const deviceDetailRows = computed(() => [
-  { label: '设备状态', value: deviceStatus.value?.device_status ?? '未知' },
-  { label: '状态机', value: deviceStatus.value?.state_machine_state ?? '未知' },
-  { label: '天平就绪', value: deviceStatus.value?.balance_ready ? '就绪' : '未就绪 / 未知' },
-  { label: '当前重量', value: deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined ? `${formatWeightMg(deviceStatus.value.current_weight_mg)} mg` : '无' },
-  { label: '当前任务', value: deviceStatus.value?.current_task_id ?? '无' },
-  { label: '当前命令', value: deviceStatus.value?.current_command_id ?? '无' },
-])
-
 async function refreshDashboard(silent = false) {
   if (refreshInFlight) return
   refreshInFlight = true
@@ -145,6 +137,11 @@ async function refreshDashboard(silent = false) {
 async function fetchDevice() {
   try {
     const nextDeviceStatus = await deviceApi.status()
+    if (nextDeviceStatus.current_weight_mg !== null && nextDeviceStatus.current_weight_mg !== undefined) {
+      lastKnownWeightMg.value = nextDeviceStatus.current_weight_mg
+    } else if (lastKnownWeightMg.value !== null) {
+      nextDeviceStatus.current_weight_mg = lastKnownWeightMg.value
+    }
     const nextSnapshot = JSON.stringify(nextDeviceStatus)
     if (nextSnapshot !== deviceSnapshot) {
       deviceStatus.value = nextDeviceStatus
@@ -245,12 +242,6 @@ onUnmounted(() => {
               <p class="mt-1 text-xs text-muted-foreground">已合并原“系统状态”页的设备状态接口字段。</p>
             </div>
             <Button variant="outline" size="sm" @click="refreshDashboard">刷新</Button>
-          </div>
-          <div class="mb-4 grid grid-cols-1 gap-2 rounded-md border border-border bg-muted/20 p-3 md:grid-cols-5">
-            <div v-for="row in deviceDetailRows" :key="row.label" class="min-w-0">
-              <div class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{{ row.label }}</div>
-              <div class="mt-1 truncate text-sm font-medium text-foreground" :title="row.value">{{ row.value }}</div>
-            </div>
           </div>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             <DeviceStatusCard name="机械臂" :status="backendOnline ? 'online' : 'unknown'" :detail="deviceStatus?.state_machine_state || '状态机未知'" :icon="RadioTower" />

@@ -39,6 +39,14 @@ class ControlClient:
             transport=transport,
             trust_env=False,
         )
+        self._last_status: dict[str, Any] = {
+            "device_status": "unknown",
+            "balance_ready": False,
+            "current_weight_mg": None,
+            "current_command_id": None,
+            "current_task": None,
+            "last_completed_task": None,
+        }
 
     async def send_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
         """下发指令。
@@ -91,13 +99,25 @@ class ControlClient:
         try:
             resp = await self._client.get("/api/status")
             resp.raise_for_status()
-            return resp.json()
+            status = resp.json()
+            if status.get("current_weight_mg") is None:
+                status["current_weight_mg"] = self._last_status.get("current_weight_mg")
+            if status.get("last_completed_task") is None:
+                status["last_completed_task"] = self._last_status.get("last_completed_task")
+            self._last_status = {**self._last_status, **status}
+            return status
         except httpx.HTTPError as e:
             logger.warning("获取设备状态失败: %s", type(e).__name__)
-            return {"device_status": "unknown", "balance_ready": False}
+            return {
+                **self._last_status,
+                "device_status": "unknown",
+            }
         except Exception:
             logger.exception("获取设备状态未知异常")
-            return {"device_status": "unknown", "balance_ready": False}
+            return {
+                **self._last_status,
+                "device_status": "unknown",
+            }
 
     async def close(self) -> None:
         await self._client.aclose()

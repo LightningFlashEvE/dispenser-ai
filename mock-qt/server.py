@@ -31,7 +31,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import uvicorn
 
@@ -98,6 +98,8 @@ CFG: dict[str, Any] = {}
 # 当前正在执行的任务：command_id -> asyncio.Task
 _running_tasks: dict[str, asyncio.Task] = {}
 _task_records: dict[str, dict[str, Any]] = {}
+_weight_clients: set[WebSocket] = set()
+_weight_stream_task: asyncio.Task | None = None
 
 # 设备状态
 _device_state = {
@@ -155,6 +157,41 @@ def _simulate_idle_weight_mg() -> float:
     if max_mg < min_mg:
         min_mg, max_mg = max_mg, min_mg
     return round(random.uniform(min_mg, max_mg), 3)
+
+
+async def _broadcast_weight(stable: bool) -> None:
+    if not _weight_clients:
+      return
+    payload = {
+        "type": "weight",
+        "value_mg": _device_state["current_weight_mg"],
+        "stable": stable,
+        "timestamp": now_iso(),
+    }
+    dead_clients: list[WebSocket] = []
+    for websocket in list(_weight_clients):
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            dead_clients.append(websocket)
+    for websocket in dead_clients:
+        _weight_clients.discard(websocket)
+
+
+async def _weight_stream_loop() -> None:
+    while True:
+        try:
+            if not _running_tasks and _device_state["status"] == "idle":
+                _device_state["current_weight_mg"] = _simulate_idle_weight_mg()
+                await _broadcast_weight(stable=False)
+            elif _device_state["current_weight_mg"] is not None:
+                await _broadcast_weight(stable=True)
+            await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("重量流推送异常：%s", exc)
+            await asyncio.sleep(0.2)
 
 
 def _record_task(
@@ -820,9 +857,49 @@ async def get_task(command_id: str) -> JSONResponse:
     return JSONResponse(content=record)
 
 
+@app.websocket("/ws/weight")
+async def weight_websocket(websocket: WebSocket) -> None:
+    await websocket.accept()
+    _weight_clients.add(websocket)
+    try:
+        await websocket.send_json({
+            "type": "weight",
+            "value_mg": _device_state["current_weight_mg"],
+            "stable": _device_state["status"] != "idle",
+            "timestamp": now_iso(),
+        })
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.debug("weight websocket disconnected")
+    finally:
+        _weight_clients.discard(websocket)
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse(content={"status": "ok", "service": "mock-qt"})
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    global _weight_stream_task
+    if _weight_stream_task is None or _weight_stream_task.done():
+        _weight_stream_task = asyncio.create_task(_weight_stream_loop())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    global _weight_stream_task
+    if _weight_stream_task is not None:
+        _weight_stream_task.cancel()
+        try:
+            await _weight_stream_task
+        except asyncio.CancelledError:
+            pass
+        _weight_stream_task = None
 
 
 # ---------------------------------------------------------------------------
