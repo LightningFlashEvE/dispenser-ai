@@ -177,7 +177,7 @@ async def test_select_formula_by_id_and_name():
 
 
 @pytest.mark.asyncio
-async def test_formula_pending_confirm_builds_complete_payload(monkeypatch):
+async def test_formula_confirm_creates_proposal_without_command():
     formulas = _formulas()
     control = FakeControlClient()
     dispatcher = _dispatcher(formulas, control)
@@ -185,22 +185,20 @@ async def test_formula_pending_confirm_builds_complete_payload(monkeypatch):
     await dispatcher.handle_query_formula(session, "查看配方")
     await dispatcher.handle_select_formula(session, "应用第三个配方")
 
-    async def fake_create_task_record(intent_data, command):
-        return "task_formula_1"
-
-    monkeypatch.setattr(
-        "app.services.dialog.dispatcher._create_task_record",
-        fake_create_task_record,
-    )
     result = await dispatcher.handle_confirm(session)
-    assert result.output_type == "execute_now"
-    assert control.commands[0]["command_type"] == "formula"
-    payload = control.commands[0]["payload"]
-    assert payload["formula_id"] == "F004"
-    assert payload["formula_name"] == "氯化钾注射液"
-    assert len(payload["steps"]) == 2
-    assert payload["execution_mode"] == "sequential"
-    assert payload["on_step_failure"] == "pause_and_notify"
+    assert result.output_type == "confirmation_required"
+    assert result.pending_payload == "clear"
+    assert control.commands == []
+    proposal = result.debug["formula_proposal"]
+    assert proposal["intent_type"] == "formula"
+    assert proposal["proposal_status"] == "WAITING_RULE_CHECK"
+    assert proposal["is_complete"] is True
+    assert proposal["params"]["formula_id"] == "F004"
+    assert proposal["params"]["formula_name"] == "氯化钾注射液"
+    assert len(proposal["params"]["steps"]) == 2
+    assert proposal["params"]["execution_mode"] == "sequential"
+    assert proposal["params"]["on_step_failure"] == "pause_and_notify"
+    assert "不会下发控制命令" in result.dialog_text
 
 
 @pytest.mark.asyncio

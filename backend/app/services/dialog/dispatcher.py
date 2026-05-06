@@ -383,6 +383,8 @@ class IntentDispatcher:
                 pending_payload="clear",
                 output_type="reject",
             )
+        if pending.intent_data.get("intent_type") == "formula":
+            return await self._hold_formula_for_approval(session, pending)
         return await self._execute_pending(session, pending)
 
     async def handle_cancel_pending(self, session: Session) -> DispatchResult:
@@ -563,6 +565,28 @@ class IntentDispatcher:
             pending_payload="clear",
             speak_text="已下发指令，正在执行",
             output_type="execute_now",
+        )
+
+    async def _hold_formula_for_approval(
+        self, session: Session, pending: PendingIntent
+    ) -> DispatchResult:
+        intent_data = pending.intent_data
+        params = intent_data.get("params") or {}
+        formula_name = params.get("formula_name") or params.get("formula_id") or "该配方"
+        step_count = len(params.get("steps") or [])
+        text = (
+            f"已生成配方 proposal：{formula_name}，共 {step_count} 步。"
+            "下一步将进入规则校验和人工审批，当前不会下发控制命令。"
+        )
+        intent_data["proposal_status"] = "WAITING_RULE_CHECK"
+        session.reset()
+        return DispatchResult(
+            dialog_text=text,
+            speak_text=text,
+            state="ASKING",
+            pending_payload="clear",
+            output_type="confirmation_required",
+            debug={"formula_proposal": intent_data},
         )
 
     # ─── 查询类直接执行 ──────────────────────────────────────────
