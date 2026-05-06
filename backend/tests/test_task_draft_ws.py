@@ -46,9 +46,16 @@ class FakeLLM:
     async def _call(self, messages, *, force_json):
         raise RuntimeError("force rule fallback in tests")
 
+    async def interpret_confirmation(self, user_text, pending_summary):
+        return "confirm" if user_text.strip() == "确认" else "unknown"
+
 
 class FakeControlClient:
+    def __init__(self):
+        self.commands: list[dict] = []
+
     async def send_command(self, command):
+        self.commands.append(command)
         return True, None
 
     async def get_status(self):
@@ -82,10 +89,11 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
     session_id = "ws_draft_test"
     draft_manager.clear(session_id)
     session = Session(session_id=session_id)
+    control = FakeControlClient()
     dispatcher = IntentDispatcher(
         llm=FakeLLM(),
         state_machine=StateMachine(),
-        control_client=FakeControlClient(),
+        control_client=control,
     )
 
     await channels._process_text_input(dispatcher, session, "client_1", "帮我称 5g 氯化钠")
@@ -115,6 +123,15 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
     assert pending["data"]["intent_type"] == "dispense"
     assert pending["data"]["params"]["target_mass_mg"] == 5000
     assert pending["data"]["params"]["target_vessel"] == "A1"
+
+    await channels._process_text_input(dispatcher, session, "client_1", "确认")
+    held_reply = _last_message(fake_ws.messages, "chat.done")
+    assert "已生成称量 proposal" in held_reply["text"]
+    assert "不会下发控制命令" in held_reply["text"]
+    assert _last_message(fake_ws.messages, "pending_cleared")
+    assert control.commands == []
+    assert not any(msg.get("type") == "command_sent" for msg in fake_ws.messages)
+    assert not any(msg.get("type") == "error" for msg in fake_ws.messages)
 
 
 @pytest.mark.asyncio

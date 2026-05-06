@@ -385,6 +385,11 @@ class IntentDispatcher:
             )
         if pending.intent_data.get("intent_type") == "formula":
             return await self._hold_formula_for_approval(session, pending)
+        if (
+            pending.intent_data.get("task_type") == "WEIGHING"
+            and pending.intent_data.get("draft_id")
+        ):
+            return await self._hold_weighing_for_approval(session, pending)
         return await self._execute_pending(session, pending)
 
     async def handle_cancel_pending(self, session: Session) -> DispatchResult:
@@ -587,6 +592,28 @@ class IntentDispatcher:
             pending_payload="clear",
             output_type="confirmation_required",
             debug={"formula_proposal": intent_data},
+        )
+
+    async def _hold_weighing_for_approval(
+        self, session: Session, pending: PendingIntent
+    ) -> DispatchResult:
+        intent_data = pending.intent_data
+        params = intent_data.get("params") or {}
+        reagent = (intent_data.get("reagent_hint") or {}).get("raw_text") or "该化学品"
+        target_mass = params.get("target_mass_mg")
+        text = (
+            f"已生成称量 proposal：{reagent}，目标质量 {target_mass} mg。"
+            "下一步将进入规则校验和人工审批，当前不会下发控制命令。"
+        )
+        intent_data["proposal_status"] = "WAITING_RULE_CHECK"
+        session.reset()
+        return DispatchResult(
+            dialog_text=text,
+            speak_text=text,
+            state="ASKING",
+            pending_payload="clear",
+            output_type="confirmation_required",
+            debug={"weighing_proposal": intent_data},
         )
 
     # ─── 查询类直接执行 ──────────────────────────────────────────

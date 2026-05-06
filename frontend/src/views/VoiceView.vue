@@ -298,7 +298,9 @@ const canConfirmDraft = computed(() => Boolean(
   voiceStore.currentDraft?.ready_for_review || hasDraftAsrConfirmation.value,
 ))
 const draftConfirmLabel = computed(() => (
-  hasDraftAsrConfirmation.value ? '确认识别内容' : '✓ 确认'
+  voiceStore.currentDraft?.status === 'PROPOSAL_CREATED'
+    ? '等待审批'
+    : hasDraftAsrConfirmation.value ? '确认识别内容' : '✓ 确认'
 ))
 
 const scrollBottom = () => nextTick(() => { if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight })
