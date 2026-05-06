@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -90,7 +91,6 @@ AUTO_EXECUTE_INTENTS: set[str] = {
     "device_status",
     "emergency_stop",
     "cancel",
-    "formula",
 }
 
 
@@ -460,12 +460,6 @@ class IntentDispatcher:
             if intent_type == "query_stock":
                 return await self.handle_query_stock(session, keyword)
             return await self.handle_query_formula(session, keyword)
-        if intent_type == "formula":
-            keyword = (
-                (intent_data.get("params") or {}).get("raw_text")
-                or (intent_data.get("reagent_hint") or {}).get("raw_text")
-            )
-            return await self.handle_query_formula(session, keyword)
         if intent_type == "emergency_stop":
             return await self.handle_emergency_stop(session)
         if intent_type == "cancel":
@@ -671,19 +665,11 @@ class IntentDispatcher:
     ) -> DispatchResult:
         query = _normalize_formula_keyword(keyword)
 
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-            from app.models.formula import Formula, FormulaStep
-            stmt = (
-                select(Formula)
-                .options(selectinload(Formula.steps))
-                .order_by(Formula.formula_name)
-            )
-            result = await db.execute(stmt)
-            all_formulas: list[Formula] = list(result.scalars().all())
+        all_formulas = await self._load_all_formulas()
 
         if not all_formulas:
             session.reset()
+            session.last_formula_results = []
             text = "当前没有可用配方"
             return DispatchResult(
                 dialog_text=text,
@@ -694,11 +680,13 @@ class IntentDispatcher:
         # 通用配方查询：返回列表
         if query is None:
             preview = all_formulas[:10]
+            session.reset()
+            session.last_formula_results = [_formula_summary(f) for f in preview]
             lines = [
                 f"当前共有 {len(all_formulas)} 个配方：",
                 *[
-                    f"  • {f.formula_name}（{f.formula_id}），共 {len(f.steps)} 步"
-                    for f in preview
+                    f"  {idx}. {f.formula_name}（{f.formula_id}），共 {len(f.steps)} 步"
+                    for idx, f in enumerate(preview, start=1)
                 ],
             ]
             if len(all_formulas) > len(preview):
@@ -707,7 +695,6 @@ class IntentDispatcher:
             dialog_text = "\n".join(lines)
             speak_text = f"当前共有 {len(all_formulas)} 个配方，详情已显示在屏幕上。"
 
-            session.reset()
             return DispatchResult(
                 dialog_text=dialog_text,
                 speak_text=speak_text,
@@ -744,6 +731,7 @@ class IntentDispatcher:
             )
 
         best_formula, best_score = scored[0]
+        session.last_formula_results = [_formula_summary(f) for f, _score in scored[:10]]
 
         if best_score < 0.5 and len(scored) > 1:
             best_formula, best_score = scored[0]
@@ -780,6 +768,7 @@ class IntentDispatcher:
             )
 
         session.reset()
+        session.last_formula_results = [_formula_summary(f) for f, _score in scored[:10]]
         return DispatchResult(
             dialog_text=speak_text,
             speak_text=speak_text,
@@ -787,6 +776,97 @@ class IntentDispatcher:
             pending_payload="clear",
             output_type="execute_now",
             debug={"formula_info": formula_info},
+        )
+
+    async def handle_select_formula(
+        self, session: Session, user_text: str
+    ) -> DispatchResult:
+        """Select a formula from the last visible formula result list.
+
+        This path creates a pending intent only. It never sends a command until
+        the user confirms the pending proposal.
+        """
+        last_results = session.last_formula_results
+        if not last_results:
+            text = "我还没有可引用的配方列表，请先说查看配方。"
+            return DispatchResult(
+                dialog_text=text,
+                speak_text=text,
+                state="ASKING",
+                output_type="question",
+            )
+
+        selected: dict[str, Any] | None = None
+        selected_index = _parse_formula_index(user_text)
+        if selected_index is not None:
+            if selected_index < 0 or selected_index >= len(last_results):
+                text = f"上次只列出了 {len(last_results)} 个配方，请重新选择。"
+                return DispatchResult(
+                    dialog_text=text,
+                    speak_text=text,
+                    state="ASKING",
+                    output_type="question",
+                )
+            selected = last_results[selected_index]
+        else:
+            selected = _match_formula_result(last_results, user_text)
+
+        if selected is None:
+            text = "没有在上次配方列表中找到对应配方，请重新选择。"
+            return DispatchResult(
+                dialog_text=text,
+                speak_text=text,
+                state="ASKING",
+                output_type="question",
+            )
+
+        formula = await self._load_formula_by_id(str(selected.get("formula_id") or ""))
+        if formula is None:
+            formula_id = selected.get("formula_id") or "未知"
+            text = f"配方 {formula_id} 已不存在，请重新查看配方。"
+            return DispatchResult(
+                dialog_text=text,
+                speak_text=text,
+                state="ASKING",
+                output_type="question",
+            )
+
+        steps = _formula_steps(formula)
+        intent_data = {
+            "schema_version": "1.0",
+            "intent_id": f"intent_{uuid.uuid4().hex}",
+            "intent_type": "formula",
+            "task_type": "FORMULA",
+            "timestamp": _now_iso(),
+            "is_complete": True,
+            "missing_slots": [],
+            "clarification_question": None,
+            "reagent_hint": None,
+            "params": {
+                "formula_id": formula.formula_id,
+                "formula_name": formula.formula_name,
+                "steps": steps,
+                "execution_mode": "sequential",
+                "on_step_failure": "pause_and_notify",
+            },
+            "raw_asr_text": user_text,
+            "confidence": 1.0,
+        }
+        pending = session.set_pending(
+            intent_data=intent_data,
+            drug_info=None,
+            ttl_seconds=settings.pending_intent_ttl_sec,
+        )
+
+        ordinal = selected_index + 1 if selected_index is not None else None
+        prefix = f"已选择第 {ordinal} 个配方" if ordinal is not None else "已选择配方"
+        text = f"{prefix}：{formula.formula_name}，共 {len(steps)} 步。请确认是否应用。"
+        return DispatchResult(
+            dialog_text=text,
+            speak_text=text,
+            state="ASKING",
+            output_type="action_proposal",
+            pending_payload=pending.to_wire(),
         )
 
     async def handle_emergency_stop(self, session: Session) -> DispatchResult:
@@ -868,6 +948,32 @@ class IntentDispatcher:
 
         intent_data.setdefault("params", {})["components"] = resolved
         return True, None
+
+    async def _load_all_formulas(self) -> list[Any]:
+        async with AsyncSessionLocal() as db:
+            from app.models.formula import Formula
+
+            stmt = (
+                select(Formula)
+                .options(selectinload(Formula.steps))
+                .order_by(Formula.formula_name)
+            )
+            result = await db.execute(stmt)
+            return list(result.scalars().all())
+
+    async def _load_formula_by_id(self, formula_id: str) -> Any | None:
+        if not formula_id:
+            return None
+        async with AsyncSessionLocal() as db:
+            from app.models.formula import Formula
+
+            stmt = (
+                select(Formula)
+                .options(selectinload(Formula.steps))
+                .where(Formula.formula_id == formula_id)
+            )
+            result = await db.execute(stmt)
+            return result.scalar_one_or_none()
 
 
 # ─── DB 工具 ─────────────────────────────────────────────────────
@@ -1019,6 +1125,97 @@ def _normalize_formula_keyword(text: str | None) -> str | None:
         return None
 
     return cleaned
+
+
+def _formula_summary(formula: Any) -> dict[str, Any]:
+    return {
+        "formula_id": formula.formula_id,
+        "formula_name": formula.formula_name,
+        "step_count": len(getattr(formula, "steps", []) or []),
+    }
+
+
+def _formula_steps(formula: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "step_index": s.step_index,
+            "step_name": s.step_name,
+            "command_type": s.command_type,
+            "reagent_code": s.reagent_code,
+            "target_mass_mg": s.target_mass_mg,
+            "tolerance_mg": s.tolerance_mg,
+            "target_vessel": s.target_vessel,
+        }
+        for s in sorted(getattr(formula, "steps", []) or [], key=lambda x: x.step_index)
+    ]
+
+
+def _parse_formula_index(text: str) -> int | None:
+    compact = re.sub(r"[\s，。！？,.!?]", "", text.strip())
+    digit_match = re.search(r"第(\d+)(个|项|条)?配方?", compact)
+    if digit_match:
+        return int(digit_match.group(1)) - 1
+
+    chinese_match = re.search(r"第([一二三四五六七八九十两]+)(个|项|条)?配方?", compact)
+    if chinese_match:
+        value = _chinese_ordinal_to_int(chinese_match.group(1))
+        if value is not None:
+            return value - 1
+    return None
+
+
+def _chinese_ordinal_to_int(text: str) -> int | None:
+    digits = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    if text == "十":
+        return 10
+    if text.startswith("十") and len(text) == 2:
+        tail = digits.get(text[1])
+        return 10 + tail if tail is not None else None
+    if text.endswith("十") and len(text) == 2:
+        head = digits.get(text[0])
+        return head * 10 if head is not None else None
+    if "十" in text and len(text) == 3:
+        head, tail = text.split("十", 1)
+        head_value = digits.get(head)
+        tail_value = digits.get(tail)
+        if head_value is not None and tail_value is not None:
+            return head_value * 10 + tail_value
+    return digits.get(text)
+
+
+def _match_formula_result(
+    last_results: list[dict[str, Any]],
+    user_text: str,
+) -> dict[str, Any] | None:
+    compact = re.sub(r"[\s，。！？,.!?]", "", user_text.strip()).lower()
+    cleaned = re.sub(r"(应用|使用|执行|套用|选择|选用|采用|配方)", "", compact)
+    candidates = [cleaned, compact]
+    for item in last_results:
+        formula_id = str(item.get("formula_id") or "").lower()
+        formula_name = str(item.get("formula_name") or "").lower()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if candidate == formula_id or candidate == formula_name:
+                return item
+            if candidate in formula_id or candidate in formula_name:
+                return item
+            if formula_id and formula_id in compact:
+                return item
+            if formula_name and formula_name in compact:
+                return item
+    return None
 
 
 def _default_tolerance(mass_mg: int) -> int:

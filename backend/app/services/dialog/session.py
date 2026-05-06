@@ -113,6 +113,7 @@ class Session:
         self.intent_history: list[dict[str, str]] = []
         self.round_count: int = 0
         self.pending: PendingIntent | None = None
+        self.last_formula_results: list[dict[str, Any]] = []
         self._history_max_messages = max(2, history_max_messages)
         self.state: SessionState = "idle"
 

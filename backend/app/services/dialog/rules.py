@@ -124,7 +124,14 @@ def _build_device_status_payload(intent: dict, drug: dict | None) -> dict:
 
 
 def _build_formula_payload(intent: dict, drug: dict | None) -> dict:
-    return {}
+    params = intent.get("params", {}) or {}
+    return {
+        "formula_id": params.get("formula_id"),
+        "formula_name": params.get("formula_name"),
+        "steps": params.get("steps", []),
+        "execution_mode": params.get("execution_mode") or "sequential",
+        "on_step_failure": params.get("on_step_failure") or "pause_and_notify",
+    }
 
 
 def _build_restock_payload(intent: dict, drug: dict | None) -> dict:

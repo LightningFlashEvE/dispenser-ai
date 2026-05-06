@@ -475,6 +475,11 @@ async def _process_text_input(
             )
         return
 
+    if route.route == "select_formula":
+        result = await dispatcher.handle_select_formula(session, user_text)
+        await _apply_dispatch_result(client_id, result)
+        return
+
     # 状态驱动：awaiting_confirmation 下先解释用户意图
     if session.state == "awaiting_confirmation" and session.has_active_pending():
         logger.info("[%s] 状态 awaiting_confirmation，走确认态解析", client_id)
