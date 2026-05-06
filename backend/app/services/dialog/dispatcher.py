@@ -588,29 +588,77 @@ class IntentDispatcher:
     async def handle_query_stock(
         self, session: Session, keyword: str | None
     ) -> DispatchResult:
-        if not keyword:
-            return DispatchResult(
-                dialog_text="请提供要查询的药品名称",
-                speak_text="请提供要查询的药品名称",
-                state="ASKING", output_type="question",
+        query = _normalize_stock_keyword(keyword)
+
+        # 通用库存查询：查所有活跃药品
+        if query is None:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                from app.models.drug import Drug
+
+                result = await db.execute(
+                    select(Drug)
+                    .where(Drug.is_active == True)  # noqa: E712
+                    .order_by(Drug.stock_mg.asc())
+                )
+                drugs = list(result.scalars().all())
+
+            session.reset()
+
+            if not drugs:
+                text = "当前没有可用药品库存记录"
+                return DispatchResult(
+                    dialog_text=text,
+                    speak_text=text,
+                    state="FEEDBACK",
+                    pending_payload="clear",
+                    output_type="reply",
+                )
+
+            low_drugs = [d for d in drugs if d.stock_mg < 1000]
+            preview = drugs[:8]
+
+            items = "；".join(
+                f"{d.reagent_name_cn} {d.stock_mg} mg，工位 {d.station_id or '未知'}"
+                for d in preview
             )
-        drug, score = await find_best_drug(keyword)
+
+            text = (
+                f"当前共有 {len(drugs)} 种活跃药品，"
+                f"其中低库存药品 {len(low_drugs)} 种。"
+                f"库存较低的药品有：{items}。"
+            )
+
+            if len(drugs) > len(preview):
+                text += "更多库存请在药品库存页面查看。"
+
+            return DispatchResult(
+                dialog_text=text,
+                speak_text=text,
+                state="FEEDBACK",
+                pending_payload="clear",
+                output_type="execute_now",
+            )
+
+        # 具体药品库存查询
+        drug, score = await find_best_drug(query)
         session.reset()
+
         if drug is None or score < 0.5:
             return DispatchResult(
-                dialog_text=f"没有找到药品：{keyword}",
-                speak_text=f"没有找到药品：{keyword}",
+                dialog_text=f"没有找到药品：{query}",
+                speak_text=f"没有找到药品：{query}",
                 state="FEEDBACK", pending_payload="clear", output_type="reply",
             )
+
+        text = (
+            f"{drug.reagent_name_cn} 当前库存 {drug.stock_mg} mg，"
+            f"工位 {drug.station_id or '未知'}"
+        )
+
         return DispatchResult(
-            dialog_text=(
-                f"{drug.reagent_name_cn} 当前库存 {drug.stock_mg} mg，"
-                f"工位 {drug.station_id or '未知'}"
-            ),
-            speak_text=(
-                f"{drug.reagent_name_cn} 当前库存 {drug.stock_mg} mg，"
-                f"工位 {drug.station_id or '未知'}"
-            ),
+            dialog_text=text,
+            speak_text=text,
             state="FEEDBACK", pending_payload="clear", output_type="execute_now",
         )
 
@@ -839,6 +887,44 @@ async def _load_current_task(sm: StateMachine) -> Task | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_stock_keyword(text: str | None) -> str | None:
+    """把库存查询语句归一化成药品关键词；返回 None 表示查全部库存。"""
+    if not text:
+        return None
+
+    import re
+
+    raw = text.strip()
+    if not raw:
+        return None
+
+    # 明确表示"全部库存"的说法
+    generic_patterns = (
+        r"^(查看|查询|看一下|帮我看一下|帮我查一下)?(当前|全部|所有|整体)?药品库存(情况|列表)?$",
+        r"^(查看|查询|看一下|帮我看一下|帮我查一下)?(当前|全部|所有|整体)?库存(情况|列表)?$",
+        r"^药品库存$",
+        r"^库存$",
+        r"^所有药品$",
+        r"^全部药品$",
+    )
+    if any(re.search(p, raw) for p in generic_patterns):
+        return None
+
+    # 去掉库存查询里的功能词，剩下的当药品名/编号/别名
+    cleaned = re.sub(
+        r"(查看|查询|看一下|帮我看一下|帮我查一下|当前|药品|库存|还有多少|剩多少|还剩多少|的|一下|请|帮我)",
+        "",
+        raw,
+    )
+    cleaned = cleaned.strip(" ，。！？?")
+
+    # 剩下还是通用词，也查全部
+    if cleaned in {"", "所有", "全部", "当前", "全部药品", "所有药品"}:
+        return None
+
+    return cleaned
 
 
 def _default_tolerance(mass_mg: int) -> int:
