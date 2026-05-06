@@ -300,7 +300,19 @@ export const useVoiceStore = defineStore('voice', () => {
     _ws.commitAudio()
   }
 
-  function sendText(text: string): void { if (!text.trim()) return; _addMsg('user', text); _ws.sendUserText(text) }
+  function sendText(text: string): void {
+    const t = text.trim()
+    if (!t) return
+
+    const ok = _ws.sendUserText(t)
+    if (!ok) {
+      errorMsg.value = '语音服务连接已断开，请稍后重试'
+      setTimeout(() => { errorMsg.value = null }, 5000)
+      return
+    }
+
+    _addMsg('user', t)
+  }
   function confirmDraft(): void { sendText('确认') }
   function cancelDraft(): void { _ws.cancelTask() }
   function confirm(): void { pendingIntent.value = null; _ws.confirm() }

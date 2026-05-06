@@ -136,9 +136,19 @@ export class VoiceWebSocket {
     }
   }
 
-  sendJson(msg: OutboundMsg): void {
-    if (!this._isOpen()) return
-    this.ws!.send(JSON.stringify(msg))
+  sendJson(msg: OutboundMsg): boolean {
+    if (!this._isOpen()) {
+      console.warn('[ws] drop outbound msg, socket not open:', msg)
+      return false
+    }
+
+    try {
+      this.ws!.send(JSON.stringify(msg))
+      return true
+    } catch (e) {
+      console.warn('[ws] send failed:', e, msg)
+      return false
+    }
   }
 
   sendAudioFrame(frame: ArrayBuffer): void {
@@ -146,14 +156,14 @@ export class VoiceWebSocket {
     this.ws!.send(frame)
   }
 
-  commitAudio(): void { this.sendJson({ type: 'audio.commit' }) }
-  sendUserText(text: string): void {
-    this.sendJson({ type: 'chat.user_text', text, timestamp: new Date().toISOString() })
+  commitAudio(): boolean { return this.sendJson({ type: 'audio.commit' }) }
+  sendUserText(text: string): boolean {
+    return this.sendJson({ type: 'chat.user_text', text, timestamp: new Date().toISOString() })
   }
-  bargeIn(): void { this.sendJson({ type: 'barge_in' }) }
-  confirm(): void { this.sendJson({ type: 'confirm' }) }
-  cancelPending(): void { this.sendJson({ type: 'cancel_pending' }) }
-  cancelTask(): void { this.sendJson({ type: 'cancel' }) }
+  bargeIn(): boolean { return this.sendJson({ type: 'barge_in' }) }
+  confirm(): boolean { return this.sendJson({ type: 'confirm' }) }
+  cancelPending(): boolean { return this.sendJson({ type: 'cancel_pending' }) }
+  cancelTask(): boolean { return this.sendJson({ type: 'cancel' }) }
 
   disconnect(): void {
     this._shouldReconnect = false
