@@ -616,25 +616,36 @@ class IntentDispatcher:
                 )
 
             low_drugs = [d for d in drugs if d.stock_mg < 1000]
-            preview = drugs[:8]
 
+            # 屏幕展示：完整列表
+            all_items = "\n".join(
+                f"  • {d.reagent_name_cn} ({d.station_id or '?'}工位) — {d.stock_mg} mg"
+                + (" ⚠低库存" if d.stock_mg < 1000 else "")
+                for d in drugs
+            )
+            full_text = (
+                f"当前共有 {len(drugs)} 种活跃药品，"
+                f"其中低库存药品 {len(low_drugs)} 种：\n"
+                f"{all_items}"
+            )
+
+            # 语音播报：摘要（避免 TTS 过长）
+            preview = drugs[:8]
             items = "；".join(
                 f"{d.reagent_name_cn} {d.stock_mg} mg，工位 {d.station_id or '未知'}"
                 for d in preview
             )
-
-            text = (
+            summary = (
                 f"当前共有 {len(drugs)} 种活跃药品，"
                 f"其中低库存药品 {len(low_drugs)} 种。"
                 f"库存较低的药品有：{items}。"
             )
-
             if len(drugs) > len(preview):
-                text += "更多库存请在药品库存页面查看。"
+                summary += "更多库存请在药品库存页面查看。"
 
             return DispatchResult(
-                dialog_text=text,
-                speak_text=text,
+                dialog_text=full_text,
+                speak_text=summary,
                 state="FEEDBACK",
                 pending_payload="clear",
                 output_type="execute_now",
