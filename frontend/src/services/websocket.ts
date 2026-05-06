@@ -18,6 +18,18 @@ export interface PendingPayload {
 
 export interface SlotFillingPayload { missing_slots: string[]; question: string }
 export interface CommandResultPayload { command_id: string; status: string; message?: string }
+export interface DraftPayload {
+  draft_id: string
+  session_id: string
+  task_type: 'WEIGHING' | 'MIXING' | 'DISPENSING'
+  status: string
+  complete: boolean
+  missing_slots: string[]
+  ready_for_review: boolean
+  current_draft: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
 
 export interface Correction {
   from: string
@@ -45,6 +57,7 @@ export type InboundMsg =
   | { type: 'tts.done' }
   | { type: 'tts_end' }
   | { type: 'pending_intent'; data: PendingPayload }
+  | { type: 'draft_update'; data: DraftPayload }
   | { type: 'pending_cleared' }
   | { type: 'slot_filling'; data: SlotFillingPayload }
   | { type: 'question'; text: string }

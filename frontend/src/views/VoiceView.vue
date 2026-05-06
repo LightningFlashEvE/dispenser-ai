@@ -36,6 +36,33 @@
     </transition>
 
     <transition name="slide-down">
+      <div v-if="voiceStore.currentDraft" class="draft-card">
+        <div class="draft-header">
+          <div>
+            <span class="draft-label">任务草稿</span>
+            <span class="draft-type">{{ taskTypeLabel }}</span>
+          </div>
+          <span class="draft-status" :class="`draft-status--${draftStatusTone}`">
+            {{ draftStatusLabel }}
+          </span>
+        </div>
+        <div class="draft-body">
+          <div v-for="row in draftRows" :key="row.label" class="draft-row">
+            <span class="draft-field">{{ row.label }}</span>
+            <span class="draft-value" :class="{ 'draft-value--missing': row.missing }">{{ row.value }}</span>
+          </div>
+        </div>
+        <div class="draft-actions">
+          <button class="btn btn--confirm" :disabled="!voiceStore.currentDraft.ready_for_review" @click="voiceStore.confirmDraft">
+            ✓ 确认
+          </button>
+          <button class="btn btn--secondary" @click="focusModify">修改</button>
+          <button class="btn btn--cancel" @click="voiceStore.cancelDraft">取消</button>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="slide-down">
       <div v-if="voiceStore.pendingIntent" class="pending-card">
         <div class="pending-header">
           <span class="pending-label">待确认操作</span>
@@ -135,7 +162,7 @@
             </div>
           </div>
           <div v-else key="text" class="text-input-wrap">
-            <input v-model="textInput" class="text-input" placeholder="输入文字发送..."
+            <input ref="textInputEl" v-model="textInput" class="text-input" :placeholder="inputPlaceholder"
               maxlength="500" @keydown.enter.exact="sendText" />
             <button class="btn btn--send" :disabled="!textInput.trim() || isSending" @click="sendText">发送</button>
           </div>
@@ -163,8 +190,10 @@ import { Microphone, ChatLineRound } from '@element-plus/icons-vue'
 const voiceStore = useVoiceStore()
 const sessionsStore = useSessionsStore()
 const chatEl = ref<HTMLElement | null>(null)
+const textInputEl = ref<HTMLInputElement | null>(null)
 const textInput = ref('')
 const showSessionList = ref(false)
+const modifyMode = ref(false)
 
 onMounted(async () => {
   await sessionsStore.loadSessions()
@@ -214,6 +243,46 @@ const dictationSubtitle = computed(() => {
   if (voiceStore.isRecording) return '再次点击右侧按钮，结束听写并发送'
   return '请稍候，马上把你的话整理成一条消息'
 })
+const inputPlaceholder = computed(() => (
+  modifyMode.value ? '输入要修改的字段，例如 质量改成 3g 或 目标容器改成 B2' : '输入文字发送...'
+))
+const taskTypeLabel = computed(() => {
+  const taskType = voiceStore.currentDraft?.task_type
+  if (taskType === 'WEIGHING') return '称量'
+  if (taskType === 'DISPENSING') return '分料'
+  if (taskType === 'MIXING') return '混合'
+  return '任务'
+})
+const draftStatusLabel = computed(() => {
+  const status = voiceStore.currentDraft?.status
+  const map: Record<string, string> = {
+    COLLECTING: '正在收集信息',
+    READY_FOR_REVIEW: '等待用户确认',
+    PROPOSAL_CREATED: '已生成待审批任务',
+    CANCELLED: '已取消',
+    FAILED: '失败',
+  }
+  return status ? (map[status] ?? status) : ''
+})
+const draftStatusTone = computed(() => {
+  const status = voiceStore.currentDraft?.status
+  if (status === 'READY_FOR_REVIEW') return 'review'
+  if (status === 'PROPOSAL_CREATED') return 'proposal'
+  if (status === 'CANCELLED') return 'cancelled'
+  if (status === 'FAILED') return 'failed'
+  return 'collecting'
+})
+const draftRows = computed(() => {
+  const draft = voiceStore.currentDraft
+  const data = draft?.current_draft ?? {}
+  const missing = new Set(draft?.missing_slots ?? [])
+  return [
+    { label: '化学品', value: String(data.chemical_name ?? '待补充'), missing: missing.has('chemical_name') },
+    { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit') },
+    { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel') },
+    { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose') },
+  ]
+})
 
 const scrollBottom = () => nextTick(() => { if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight })
 watch(() => voiceStore.messages.length, scrollBottom)
@@ -247,8 +316,14 @@ function sendText() {
   if (!t || !voiceStore.isConnected || isSending.value) return
   isSending.value = true
   textInput.value = ''
+  modifyMode.value = false
   voiceStore.sendText(t)
   setTimeout(() => { isSending.value = false }, 300)
+}
+
+function focusModify() {
+  modifyMode.value = true
+  nextTick(() => textInputEl.value?.focus())
 }
 
 const PARAM_LABELS: Record<string, string> = {
@@ -261,6 +336,10 @@ const filteredParams = computed(() => {
 })
 function paramLabel(k: string) { return PARAM_LABELS[k] ?? k }
 function formatParamVal(k: string, v: unknown) { return k.endsWith('_mg') && typeof v === 'number' ? `${v} mg` : String(v) }
+function formatDraftMass(value: unknown, unit: unknown) {
+  if (value === null || value === undefined || value === '') return '待补充'
+  return `${value} ${unit ?? ''}`.trim()
+}
 function formatExpiry(iso: string) {
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
@@ -305,6 +384,22 @@ function fmtTime(iso: string) {
 .slide-down-enter-active, .slide-down-leave-active { transition: all 0.2s; }
 .slide-down-enter-from, .slide-down-leave-to { transform: translateY(-8px); opacity: 0; }
 .pending-card { margin: 12px 20px 0; border: 1px solid var(--wf-border-dark); border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--wf-bg-page); box-shadow: var(--wf-shadow-cascade); }
+.draft-card { margin: 12px 20px 0; border: 1px solid var(--wf-border-dark); border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--wf-bg-page); box-shadow: var(--wf-shadow-cascade); }
+.draft-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; background: var(--wf-bg-panel); border-bottom: 1px solid var(--wf-border-dark); }
+.draft-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--wf-text-muted); margin-right: 8px; }
+.draft-type { font-size: 13px; font-weight: 700; color: var(--wf-text-main); }
+.draft-status { font-size: 12px; font-weight: 700; border-radius: 4px; padding: 3px 8px; }
+.draft-status--collecting { color: var(--wf-blue); background: rgba(20, 110, 245, 0.1); }
+.draft-status--review { color: var(--wf-orange); background: rgba(255, 107, 0, 0.12); }
+.draft-status--proposal { color: var(--wf-green); background: rgba(0, 215, 34, 0.1); }
+.draft-status--cancelled { color: var(--wf-text-muted); background: #f0f0f0; }
+.draft-status--failed { color: var(--wf-red); background: rgba(238, 29, 54, 0.1); }
+.draft-body { padding: 12px 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.draft-row { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+.draft-field { width: 72px; color: var(--wf-text-muted); font-size: 12px; letter-spacing: 0.5px; flex-shrink: 0; }
+.draft-value { min-width: 0; color: var(--wf-text-main); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-value--missing { color: var(--wf-orange); font-weight: 500; }
+.draft-actions { display: flex; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--wf-border-dark); }
 .pending-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--wf-orange); color: var(--wf-white); }
 .pending-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
 .pending-type { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 3px; }
@@ -320,6 +415,8 @@ function fmtTime(iso: string) {
 .btn--confirm { background: var(--wf-blue); color: var(--wf-white); flex: 1; font-size: 15px; padding: 12px; }
 .btn--confirm:hover { background: var(--wf-blue-hover); }
 .btn--cancel  { background: #f0f0f0; color: var(--wf-text-muted); }
+.btn--secondary { background: var(--wf-bg-panel); color: var(--wf-text-main); border: 1px solid var(--wf-border-dark); }
+.btn--confirm:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
 .btn--send { background: var(--wf-blue); color: var(--wf-white); padding: 10px 18px; white-space: nowrap; }
 .btn--send:hover { background: var(--wf-blue-hover); }
 .btn--send:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
@@ -435,5 +532,7 @@ function fmtTime(iso: string) {
   .dictation-copy { padding: 0 18px; }
   .dictation-wave { inset: 0 14px; }
   .voice-btn { width: 72px; height: 72px; margin-left: 0; }
+  .draft-body { grid-template-columns: 1fr; }
+  .draft-actions { flex-direction: column; }
 }
 </style>

@@ -25,14 +25,14 @@
     "intent_type": {
       "type": "string",
       "enum": [
-        "dispense_powder",
-        "aliquot_powder",
-        "mix_powder",
+        "dispense",
+        "aliquot",
+        "mix",
         "query_stock",
-        "query_device_status",
-        "save_formula",
+        "device_status",
+        "formula",
         "restock",
-        "cancel_task",
+        "cancel",
         "emergency_stop",
         "unknown"
       ],
@@ -109,7 +109,7 @@
 
     "intent_params_dispense": {
       "type": "object",
-      "description": "dispense_powder 的参数槽位",
+      "description": "dispense 的参数槽位",
       "properties": {
         "target_mass_mg": {
           "type": ["integer", "null"],
@@ -130,7 +130,7 @@
 
     "intent_params_aliquot": {
       "type": "object",
-      "description": "aliquot_powder 的参数槽位",
+      "description": "aliquot 的参数槽位",
       "properties": {
         "portions": {
           "type": ["integer", "null"],
@@ -158,7 +158,7 @@
 
     "intent_params_mix": {
       "type": "object",
-      "description": "mix_powder 的参数槽位",
+      "description": "mix 的参数槽位",
       "properties": {
         "total_mass_mg": {
           "type": ["integer", "null"],
@@ -201,18 +201,18 @@
   },
 
   "_slot_filling_rules": {
-    "dispense_powder": {
+    "dispense": {
       "required_slots": ["reagent_hint.raw_text", "params.target_mass_mg", "params.target_vessel"],
       "optional_slots": ["params.tolerance_mg"],
       "default_tolerance_mg": 10,
       "note": "tolerance_mg 用户未指定时，规则引擎按 target_mass_mg 的 2% 计算默认容差，最小 1mg"
     },
-    "aliquot_powder": {
+    "aliquot": {
       "required_slots": ["reagent_hint.raw_text", "params.portions", "params.mass_per_portion_mg"],
       "optional_slots": ["params.tolerance_mg", "params.target_vessels"],
       "note": "target_vessels 为空时，规则引擎自动按顺序分配空闲容器"
     },
-    "mix_powder": {
+    "mix": {
       "required_slots": ["params.total_mass_mg", "params.components"],
       "optional_slots": ["params.ratio_type", "params.target_vessel"],
       "note": "components 中所有 fraction 之和必须 =1.0（±0.001容差），规则引擎负责校验"

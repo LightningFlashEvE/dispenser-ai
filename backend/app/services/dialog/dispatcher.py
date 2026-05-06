@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -315,6 +316,33 @@ class IntentDispatcher:
 
         # 直接执行，不再等待二次确认
         return await self._execute_pending(session, pending)
+
+    async def create_pending_from_intent(
+        self,
+        session: Session,
+        intent_data: dict[str, Any],
+    ) -> DispatchResult:
+        """Create a backend-owned pending proposal from a validated draft intent.
+
+        The draft layer owns field completeness. This method only converts the
+        formal backend intent into the existing pending approval object.
+        """
+        pending = await self._pending_from_intent(
+            session,
+            IntentResult(raw_json=intent_data, is_complete=True),
+        )
+        if pending is None:
+            return DispatchResult(
+                error_code="INTENT_BUILD_ERROR",
+                error_message="无法根据任务草稿生成正式 proposal",
+                state="ERROR",
+            )
+        return DispatchResult(
+            pending_payload=pending.to_wire(),
+            state="ASKING",
+            output_type="action_proposal",
+            pending_only=True,
+        )
 
     # ─── 确认态输入解析（P3：状态驱动） ─────────────────────────
 

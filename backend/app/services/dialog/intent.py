@@ -131,7 +131,7 @@ def _get_nested(data: dict, path: str) -> Any:
 def validate_intent(
     intent_data: dict,
     *,
-    strict_schema: bool = True,
+    strict_schema: bool = False,
 ) -> tuple[bool, list[str], str | None]:
     """校验 LLM 输出的 intent_json。
 

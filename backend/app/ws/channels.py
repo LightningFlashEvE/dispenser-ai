@@ -47,12 +47,19 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.core.database import AsyncSessionLocal
 from app.core.logging import get_logger
 from app.services.ai.llm import get_llm_async
 from app.services.ai.stt import AudioSession, get_whisper_client
 from app.services.ai.tts import get_tts_client
+from app.services.ai_extractor import AIExtractor
 from app.services.asr.lexicon import DomainLexicon
 from app.services.asr.normalizer import normalize_asr_text
+from app.services.dialogue_service import (
+    build_cancel_reply,
+    build_draft_reply,
+    build_proposal_reply,
+)
 from app.services.dialog.dispatcher import (
     DispatchResult,
     IntentDispatcher,
@@ -60,6 +67,8 @@ from app.services.dialog.dispatcher import (
 from app.services.dialog.session import Session
 from app.services.dialog.state_machine import get_state_machine
 from app.services.device.control_client import get_control_client
+from app.services.draft_manager import draft_manager
+from app.services.intent_router import route_intent
 from app.core.config import settings
 from app.ws.manager import ws_manager
 
@@ -151,6 +160,27 @@ async def _apply_dispatch_result(client_id: str, result: DispatchResult) -> None
                 "message": result.error_message or "",
             },
         )
+
+
+async def _send_draft_update(client_id: str, draft) -> None:
+    await ws_manager.send_json(
+        client_id,
+        {
+            "type": "draft_update",
+            "data": {
+                "draft_id": draft.draft_id,
+                "session_id": draft.session_id,
+                "task_type": draft.task_type.value,
+                "status": draft.status.value,
+                "complete": draft.complete,
+                "missing_slots": draft.missing_slots,
+                "ready_for_review": draft.ready_for_review,
+                "current_draft": draft.current_draft,
+                "created_at": draft.created_at.isoformat(),
+                "updated_at": draft.updated_at.isoformat(),
+            },
+        },
+    )
 
 
 # ─── TTS 辅助 ────────────────────────────────────────────────────
@@ -348,6 +378,88 @@ async def _process_text_input(
     await ws_manager.send_json(
         client_id, {"type": "state.update", "state": "thinking"}
     )
+
+    active_draft = draft_manager.get_active(session.session_id)
+    route = route_intent(user_text, active_draft)
+
+    if route.route == "cancel_task":
+        cancelled = draft_manager.cancel(session.session_id)
+        session.reset()
+        reply = build_cancel_reply(cancelled is not None)
+        await ws_manager.send_json(client_id, {"type": "pending_cleared"})
+        if cancelled is not None:
+            await _send_draft_update(client_id, cancelled)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        await ws_manager.send_json(client_id, {"type": "state.update", "state": "IDLE"})
+        return
+
+    if route.route == "clarify":
+        reply = route.clarification or "请补充更多信息。"
+        session.add_assistant_dialog(reply)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        await ws_manager.send_json(client_id, {"type": "state.update", "state": "ASKING"})
+        return
+
+    if route.route in ("start_task", "update_task") and route.task_type is not None:
+        session.add_user_dialog(user_text)
+        draft = draft_manager.get_active(session.session_id)
+        current = draft.current_draft if draft else {}
+        extractor = AIExtractor(dispatcher.llm)
+        patch = await extractor.extract_patch(route.task_type, current, user_text)
+        draft = draft_manager.get_active(session.session_id)
+        if draft is None:
+            draft = draft_manager.start(session.session_id, route.task_type)
+        draft_manager.record_event(draft, "patch_extracted", user_message=user_text, ai_patch=patch)
+        draft = draft_manager.apply_patch(
+            session.session_id,
+            route.task_type,
+            patch,
+            user_message=user_text,
+            ai_patch=patch,
+        )
+        reply = build_draft_reply(draft)
+        session.add_assistant_dialog(reply)
+        await _send_draft_update(client_id, draft)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        await ws_manager.send_json(
+            client_id,
+            {
+                "type": "state.update",
+                "state": "awaiting_confirmation" if draft.ready_for_review else "ASKING",
+            },
+        )
+        return
+
+    if route.route == "confirm_task" and active_draft is not None:
+        session.add_user_dialog(user_text)
+        try:
+            intent_data = draft_manager.create_proposal_intent(
+                active_draft,
+                user_message=user_text,
+            )
+        except ValueError as e:
+            await ws_manager.send_json(
+                client_id,
+                {"type": "error", "code": "DRAFT_NOT_READY", "message": str(e)},
+            )
+            return
+        reply = build_proposal_reply(intent_data)
+        session.add_assistant_dialog(reply)
+        await _send_draft_update(client_id, active_draft)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        result = await dispatcher.create_pending_from_intent(session, intent_data)
+        await _apply_dispatch_result(client_id, result)
+        return
+
+    if route.route == "query_device_status":
+        result = await dispatcher.handle_query_device_status(session)
+        await _apply_dispatch_result(client_id, result)
+        return
+
+    if route.route == "query_inventory":
+        result = await dispatcher.handle_query_stock(session, user_text)
+        await _apply_dispatch_result(client_id, result)
+        return
 
     # 状态驱动：awaiting_confirmation 下先解释用户意图
     if session.state == "awaiting_confirmation" and session.has_active_pending():
@@ -705,19 +817,22 @@ async def voice_websocket(websocket: WebSocket) -> None:
 
             # ── confirm ──────────────────────────────────────────────
             if msg_type == "confirm":
-                # 先尝试从对话历史解析意图（异步，用户点击后才执行）
                 await ws_manager.send_json(
                     client_id, {"type": "state.update", "state": "PROCESSING"}
                 )
-                try:
-                    result = await dispatcher.resolve_intent_from_dialog(session)
-                except Exception:
-                    logger.exception("[confirm] intent 解析异常")
-                    result = DispatchResult(
-                        error_code="INTENT_PARSE_ERROR",
-                        error_message="意图解析失败，请重试",
-                        state="ERROR",
-                    )
+                if session.has_active_pending():
+                    result = await dispatcher.handle_confirm(session)
+                else:
+                    # 兼容旧流程：没有后端 proposal 时，再从对话历史解析。
+                    try:
+                        result = await dispatcher.resolve_intent_from_dialog(session)
+                    except Exception:
+                        logger.exception("[confirm] intent 解析异常")
+                        result = DispatchResult(
+                            error_code="INTENT_PARSE_ERROR",
+                            error_message="意图解析失败，请重试",
+                            state="ERROR",
+                        )
                 await _apply_dispatch_result(client_id, result)
                 if session.session_id:
                     asyncio.create_task(_persist_session(session.session_id, session))

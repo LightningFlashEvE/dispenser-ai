@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { VoiceWebSocket, type InboundMsg, type SessionState, type PendingPayload, type Correction, type Suggestion } from '@/services/websocket'
+import { VoiceWebSocket, type InboundMsg, type SessionState, type PendingPayload, type DraftPayload, type Correction, type Suggestion } from '@/services/websocket'
 import { AudioRecorder, AudioPlayer, type MicError } from '@/services/audio'
 
 export type MsgRole = 'user' | 'assistant' | 'system'
@@ -24,6 +24,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const messages = ref<ChatMessage[]>([])
   const asrPartial = ref('')
   const pendingIntent = ref<PendingPayload | null>(null)
+  const currentDraft = ref<DraftPayload | null>(null)
   const isConnected = ref(false)
   const errorMsg = ref<string | null>(null)
   const asrMeta = ref<AsrMeta | null>(null)
@@ -209,6 +210,10 @@ export const useVoiceStore = defineStore('voice', () => {
       case 'tts.done': break
       case 'tts_end': _player.stopAll(); break
       case 'pending_intent': pendingIntent.value = msg.data; break
+      case 'draft_update':
+        currentDraft.value = msg.data
+        if (msg.data.status === 'CANCELLED') currentDraft.value = msg.data
+        break
       case 'pending_cleared': pendingIntent.value = null; break
       case 'slot_filling': break
       case 'command_sent': _addMsg('system', `✓ 指令已下发  [${msg.command_id.slice(-8)}]`); break
@@ -296,10 +301,12 @@ export const useVoiceStore = defineStore('voice', () => {
   }
 
   function sendText(text: string): void { if (!text.trim()) return; _addMsg('user', text); _ws.sendUserText(text) }
+  function confirmDraft(): void { sendText('确认') }
+  function cancelDraft(): void { _ws.cancelTask() }
   function confirm(): void { pendingIntent.value = null; _ws.confirm() }
   function cancelPending(): void { pendingIntent.value = null; _ws.cancelPending() }
   function cancelTask(): void { _ws.cancelTask() }
-  function clearMessages(): void { messages.value = []; _streamingId = null; asrPartial.value = ''; pendingIntent.value = null }
+  function clearMessages(): void { messages.value = []; _streamingId = null; asrPartial.value = ''; pendingIntent.value = null; currentDraft.value = null }
   function clearMicError(): void { micError.value = null }
 
   function calcMicLevel(frame: ArrayBuffer): number {
@@ -318,11 +325,11 @@ export const useVoiceStore = defineStore('voice', () => {
   }
 
   return {
-    sessionState, messages, asrPartial, pendingIntent, isConnected, errorMsg,
+    sessionState, messages, asrPartial, pendingIntent, currentDraft, isConnected, errorMsg,
     balanceMg, balanceStable, balanceOverLimit, audioInited, audioError,
     isRecording, isPlaying, stateLabel, micLevel,
     currentSessionId, micError,
     connect, disconnect, switchSession, loadHistory, initAudio, startRecording, stopRecording,
-    sendText, confirm, cancelPending, cancelTask, clearMessages, clearMicError,
+    sendText, confirmDraft, cancelDraft, confirm, cancelPending, cancelTask, clearMessages, clearMicError,
   }
 })
