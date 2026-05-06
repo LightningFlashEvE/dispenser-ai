@@ -9,25 +9,49 @@ def fuzzy_score(drug: Drug, keyword: str) -> float:
     kw = keyword.lower().strip()
     if not kw:
         return 0.0
+
+    name_cn = drug.reagent_name_cn.lower()
+    name_en = (drug.reagent_name_en or "").lower()
+    name_formula = (drug.reagent_name_formula or "").lower()
+    aliases_lower = [alias.lower() for alias in drug.aliases_list]
+
+    # exact match on code / name
     if drug.reagent_code.lower() == kw:
         return 1.0
-    if drug.reagent_name_cn.lower() == kw:
+    if name_cn == kw:
         return 0.95
+
+    # prefix match (e.g. "氯化" matches "氯化钠")
     if drug.reagent_code.lower().startswith(kw):
         return 0.9
-    if drug.reagent_name_cn.lower().startswith(kw):
+    if name_cn.startswith(kw):
         return 0.85
-    aliases_lower = [alias.lower() for alias in drug.aliases_list]
+
+    # alias exact / substring
     if kw in aliases_lower:
         return 0.95
     if any(kw in alias for alias in aliases_lower):
         return 0.75
-    if drug.reagent_name_formula and kw in drug.reagent_name_formula.lower():
+
+    # keyword as substring of drug fields
+    if name_formula and kw in name_formula:
         return 0.7
-    if drug.reagent_name_en and kw in drug.reagent_name_en.lower():
+    if name_en and kw in name_en:
         return 0.6
-    if kw in drug.reagent_name_cn.lower():
+    if kw in name_cn:
         return 0.5
+
+    # reverse: drug name appears inside the keyword (e.g. "查一下氯化钠库存")
+    # require at least 2 chars to avoid false positives on single-char names
+    if name_cn and len(name_cn) >= 2 and name_cn in kw:
+        return 0.55
+    if name_en and len(name_en) >= 2 and name_en in kw:
+        return 0.45
+    if name_formula and len(name_formula) >= 2 and name_formula in kw:
+        return 0.4
+    if any(alias in kw for alias in aliases_lower if len(alias) >= 2):
+        return 0.5
+
     return 0.0
 
 
