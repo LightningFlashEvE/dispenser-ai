@@ -178,6 +178,8 @@ async def _send_draft_update(client_id: str, draft) -> None:
                 "current_draft": draft.current_draft,
                 "created_at": draft.created_at.isoformat(),
                 "updated_at": draft.updated_at.isoformat(),
+                "confirmed_at": draft.confirmed_at.isoformat() if draft.confirmed_at else None,
+                "cancelled_at": draft.cancelled_at.isoformat() if draft.cancelled_at else None,
             },
         },
     )

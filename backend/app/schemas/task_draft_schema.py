@@ -26,6 +26,7 @@ class DraftStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
 
 
 class DraftValidationResult(BaseModel):
@@ -59,3 +60,5 @@ class TaskDraftRecord(BaseModel):
     events: list[DraftEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    cancelled_at: datetime | None = None
+    confirmed_at: datetime | None = None

@@ -1,8 +1,10 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 
 from app.schemas.task_draft_schema import DraftStatus, TaskType
 from app.services.ai_extractor import AIExtractor
 from app.services.draft_manager import DraftManager
+from app.services.draft_store import SQLiteDraftStore
 from app.services.intent_router import route_intent
 from app.services.proposal_adapter import weighing_draft_to_legacy_dispense_intent
 from app.validators.weighing_validator import validate_weighing_draft
@@ -223,6 +225,88 @@ def test_duplicate_proposal_creation_is_idempotent():
     assert [e.event_type for e in draft.events].count("proposal_created") == 1
 
 
+def test_draft_store_recovers_active_draft_after_restart(tmp_path):
+    store_path = tmp_path / "drafts.db"
+    first_manager = DraftManager(store=SQLiteDraftStore(store_path))
+    first_draft = first_manager.apply_patch(
+        "session_persist",
+        TaskType.WEIGHING,
+        {"chemical_name": "氯化钠", "target_mass": 5, "mass_unit": "g"},
+        user_message="帮我称 5g 氯化钠",
+        ai_patch={"chemical_name": "氯化钠", "target_mass": 5, "mass_unit": "g"},
+    )
+
+    restored_manager = DraftManager(store=SQLiteDraftStore(store_path))
+    restored = restored_manager.get_active("session_persist")
+
+    assert restored is not None
+    assert restored.draft_id == first_draft.draft_id
+    assert restored.current_draft["chemical_name"] == "氯化钠"
+    assert restored.missing_slots == ["target_vessel", "purpose"]
+    assert [event.event_type for event in restored.events] == [
+        "draft_created",
+        "patch_applied",
+        "validation_failed",
+    ]
+
+
+def test_proposal_created_draft_is_persisted_for_audit(tmp_path):
+    store_path = tmp_path / "drafts.db"
+    manager = DraftManager(store=SQLiteDraftStore(store_path))
+    draft = manager.apply_patch(
+        "session_proposal",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+    )
+    intent = manager.create_proposal_intent(draft, user_message="确认")
+
+    restored = DraftManager(store=SQLiteDraftStore(store_path)).get_by_draft_id(draft.draft_id)
+
+    assert restored is not None
+    assert restored.status == DraftStatus.PROPOSAL_CREATED
+    assert restored.confirmed_at is not None
+    assert restored.proposal_intent == intent
+    assert restored.events[-1].event_type == "proposal_created"
+
+
+def test_stale_collecting_and_review_drafts_expire(tmp_path):
+    manager = DraftManager(store=SQLiteDraftStore(tmp_path / "drafts.db"))
+    collecting = manager.apply_patch(
+        "session_collecting_expire",
+        TaskType.WEIGHING,
+        {"chemical_name": "氯化钠"},
+    )
+    review = manager.apply_patch(
+        "session_review_expire",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+    )
+    now = datetime.now(timezone.utc)
+    collecting.updated_at = now - timedelta(minutes=31)
+    review.updated_at = now - timedelta(minutes=11)
+
+    expired = manager.expire_stale(now=now)
+
+    assert {draft.draft_id for draft in expired} == {collecting.draft_id, review.draft_id}
+    assert collecting.status == DraftStatus.EXPIRED
+    assert review.status == DraftStatus.EXPIRED
+    assert manager.get_active("session_collecting_expire") is None
+    assert manager.get_active("session_review_expire") is None
+    assert collecting.events[-1].event_type == "draft_expired"
+
+
 def test_weighing_adapter_is_the_only_legacy_dispense_boundary():
     manager = DraftManager()
     draft = manager.apply_patch(
@@ -271,3 +355,31 @@ async def test_debug_draft_events_endpoint_returns_audit_events():
     assert "draft_created" in event_types
     assert "patch_applied" in event_types
     assert "validation_failed" in event_types
+
+
+@pytest.mark.asyncio
+async def test_debug_draft_list_and_expire_endpoint(tmp_path):
+    from app.api.debug import expire_stale_drafts, list_drafts
+
+    manager = DraftManager(store=SQLiteDraftStore(tmp_path / "drafts.db"))
+    draft = manager.apply_patch(
+        "session_debug_list",
+        TaskType.WEIGHING,
+        {"chemical_name": "氯化钠"},
+    )
+    draft.updated_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+
+    from app.services import draft_manager as draft_manager_module
+    original_global = draft_manager_module.draft_manager
+    try:
+        draft_manager_module.draft_manager = manager
+        import app.api.debug as debug_module
+        debug_module.draft_manager = manager
+        listed = await list_drafts()
+        expired = await expire_stale_drafts()
+    finally:
+        draft_manager_module.draft_manager = original_global
+
+    assert listed["drafts"][0]["draft_id"] == draft.draft_id
+    assert expired["expired_count"] == 1
+    assert expired["draft_ids"] == [draft.draft_id]
