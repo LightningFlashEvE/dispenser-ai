@@ -117,6 +117,51 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
     assert pending["data"]["params"]["target_vessel"] == "A1"
 
 
+@pytest.mark.asyncio
+async def test_weighing_draft_websocket_asr_guard_flow(monkeypatch):
+    import app.services.dialog.dispatcher as dispatcher_module
+
+    fake_ws = FakeWsManager()
+    monkeypatch.setattr(channels, "ws_manager", fake_ws)
+    monkeypatch.setattr(dispatcher_module, "find_best_drug", lambda keyword: None)
+
+    session_id = "ws_asr_guard_test"
+    draft_manager.clear(session_id)
+    session = Session(session_id=session_id)
+    dispatcher = IntentDispatcher(
+        llm=FakeLLM(),
+        state_machine=StateMachine(),
+        control_client=FakeControlClient(),
+    )
+
+    await channels._process_text_input(
+        dispatcher,
+        session,
+        "client_asr",
+        "帮我称5g氯化钠，放到 A1，做标准液",
+        asr={
+            "raw_text": "帮我称五克绿化钠，放到 A1，做标准液",
+            "normalized_text": "帮我称5g氯化钠，放到 A1，做标准液",
+            "confidence": 0.78,
+            "needs_confirmation": True,
+        },
+    )
+    guarded = _last_message(fake_ws.messages, "draft_update")
+    assert guarded["data"]["status"] == "NEEDS_FIELD_CONFIRMATION"
+    assert guarded["data"]["ready_for_review"] is False
+    assert guarded["data"]["asr"]["raw_text"] == "帮我称五克绿化钠，放到 A1，做标准液"
+    assert guarded["data"]["asr"]["needs_confirmation"] is True
+    assert "chemical_name" in guarded["data"]["pending_confirmation_fields"]
+    assert "语音识别内容" in _last_message(fake_ws.messages, "chat.done")["text"]
+
+    await channels._process_text_input(dispatcher, session, "client_asr", "确认")
+    confirmed = _last_message(fake_ws.messages, "draft_update")
+    assert confirmed["data"]["status"] == "READY_FOR_REVIEW"
+    assert confirmed["data"]["ready_for_review"] is True
+    assert confirmed["data"]["asr"]["needs_confirmation"] is False
+    assert confirmed["data"]["pending_confirmation_fields"] == []
+
+
 def _last_message(messages: list[dict], msg_type: str) -> dict:
     for msg in reversed(messages):
         if msg.get("type") == msg_type:

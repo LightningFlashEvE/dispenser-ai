@@ -47,14 +47,21 @@
           </span>
         </div>
         <div class="draft-body">
+          <div v-if="hasDraftAsrConfirmation" class="draft-asr-warning">
+            <span class="draft-asr-title">该任务包含语音识别修正内容，请确认。</span>
+            <span v-if="voiceStore.currentDraft.asr?.raw_text" class="draft-asr-raw">
+              原始识别：{{ voiceStore.currentDraft.asr.raw_text }}
+            </span>
+          </div>
           <div v-for="row in draftRows" :key="row.label" class="draft-row">
             <span class="draft-field">{{ row.label }}</span>
             <span class="draft-value" :class="{ 'draft-value--missing': row.missing }">{{ row.value }}</span>
+            <span v-if="row.needsConfirmation" class="draft-field-confirm">待确认</span>
           </div>
         </div>
         <div class="draft-actions">
-          <button class="btn btn--confirm" :disabled="!voiceStore.currentDraft.ready_for_review" @click="voiceStore.confirmDraft">
-            ✓ 确认
+          <button class="btn btn--confirm" :disabled="!canConfirmDraft" @click="voiceStore.confirmDraft">
+            {{ draftConfirmLabel }}
           </button>
           <button class="btn btn--secondary" @click="focusModify">修改</button>
           <button class="btn btn--cancel" @click="voiceStore.cancelDraft">取消</button>
@@ -258,6 +265,7 @@ const draftStatusLabel = computed(() => {
   const map: Record<string, string> = {
     COLLECTING: '正在收集信息',
     READY_FOR_REVIEW: '等待用户确认',
+    NEEDS_FIELD_CONFIRMATION: '等待识别确认',
     PROPOSAL_CREATED: '已生成待审批任务',
     CANCELLED: '已取消',
     FAILED: '失败',
@@ -266,6 +274,7 @@ const draftStatusLabel = computed(() => {
 })
 const draftStatusTone = computed(() => {
   const status = voiceStore.currentDraft?.status
+  if (status === 'NEEDS_FIELD_CONFIRMATION') return 'asr'
   if (status === 'READY_FOR_REVIEW') return 'review'
   if (status === 'PROPOSAL_CREATED') return 'proposal'
   if (status === 'CANCELLED') return 'cancelled'
@@ -276,13 +285,21 @@ const draftRows = computed(() => {
   const draft = voiceStore.currentDraft
   const data = draft?.current_draft ?? {}
   const missing = new Set(draft?.missing_slots ?? [])
+  const pending = new Set(draft?.pending_confirmation_fields ?? [])
   return [
-    { label: '化学品', value: String(data.chemical_name ?? '待补充'), missing: missing.has('chemical_name') },
-    { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit') },
-    { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel') },
-    { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose') },
+    { label: '化学品', value: String(data.chemical_name ?? '待补充'), missing: missing.has('chemical_name'), needsConfirmation: pending.has('chemical_name') },
+    { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit'), needsConfirmation: pending.has('target_mass') || pending.has('mass_unit') },
+    { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel'), needsConfirmation: pending.has('target_vessel') },
+    { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
   ]
 })
+const hasDraftAsrConfirmation = computed(() => Boolean(voiceStore.currentDraft?.asr?.needs_confirmation))
+const canConfirmDraft = computed(() => Boolean(
+  voiceStore.currentDraft?.ready_for_review || hasDraftAsrConfirmation.value,
+))
+const draftConfirmLabel = computed(() => (
+  hasDraftAsrConfirmation.value ? '确认识别内容' : '✓ 确认'
+))
 
 const scrollBottom = () => nextTick(() => { if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight })
 watch(() => voiceStore.messages.length, scrollBottom)
@@ -390,15 +407,20 @@ function fmtTime(iso: string) {
 .draft-type { font-size: 13px; font-weight: 700; color: var(--wf-text-main); }
 .draft-status { font-size: 12px; font-weight: 700; border-radius: 4px; padding: 3px 8px; }
 .draft-status--collecting { color: var(--wf-blue); background: rgba(20, 110, 245, 0.1); }
+.draft-status--asr { color: var(--wf-orange); background: rgba(255, 107, 0, 0.12); }
 .draft-status--review { color: var(--wf-orange); background: rgba(255, 107, 0, 0.12); }
 .draft-status--proposal { color: var(--wf-green); background: rgba(0, 215, 34, 0.1); }
 .draft-status--cancelled { color: var(--wf-text-muted); background: #f0f0f0; }
 .draft-status--failed { color: var(--wf-red); background: rgba(238, 29, 54, 0.1); }
 .draft-body { padding: 12px 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.draft-asr-warning { grid-column: 1 / -1; border: 1px solid rgba(255, 107, 0, 0.28); background: rgba(255, 107, 0, 0.08); color: #a64600; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.draft-asr-title { font-weight: 700; }
+.draft-asr-raw { color: var(--wf-text-muted); }
 .draft-row { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
 .draft-field { width: 72px; color: var(--wf-text-muted); font-size: 12px; letter-spacing: 0.5px; flex-shrink: 0; }
 .draft-value { min-width: 0; color: var(--wf-text-main); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .draft-value--missing { color: var(--wf-orange); font-weight: 500; }
+.draft-field-confirm { flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--wf-orange); border: 1px solid rgba(255, 107, 0, 0.32); background: rgba(255, 107, 0, 0.08); border-radius: 3px; padding: 1px 5px; }
 .draft-actions { display: flex; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--wf-border-dark); }
 .pending-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--wf-orange); color: var(--wf-white); }
 .pending-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }

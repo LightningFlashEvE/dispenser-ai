@@ -27,6 +27,13 @@ export interface DraftPayload {
   missing_slots: string[]
   ready_for_review: boolean
   current_draft: Record<string, unknown>
+  asr?: {
+    raw_text?: string | null
+    normalized_text?: string | null
+    confidence?: number | null
+    needs_confirmation?: boolean
+  } | null
+  pending_confirmation_fields?: string[]
   created_at: string
   updated_at: string
 }

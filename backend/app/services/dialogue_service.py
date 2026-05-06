@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.schemas.task_draft_schema import TaskDraftRecord
+from app.schemas.task_draft_schema import DraftStatus, TaskDraftRecord
 
 
 SLOT_LABELS = {
@@ -15,6 +15,23 @@ SLOT_LABELS = {
 
 
 def build_draft_reply(draft: TaskDraftRecord) -> str:
+    if draft.status == DraftStatus.NEEDS_FIELD_CONFIRMATION:
+        data = draft.current_draft
+        asr = draft.asr or {}
+        parts: list[str] = []
+        if data.get("target_mass") and data.get("mass_unit"):
+            parts.append(f"称量 {_format_amount(data.get('target_mass'))}{data.get('mass_unit')}")
+        if data.get("chemical_name"):
+            parts.append(str(data.get("chemical_name")))
+        if data.get("target_vessel"):
+            parts.append(f"放入 {data.get('target_vessel')}")
+        summary = " ".join(parts) if parts else "更新称量任务信息"
+        return (
+            f"识别到你可能要{summary}。"
+            f"原始识别：{asr.get('raw_text') or '未知'}。"
+            "请先确认语音识别内容是否正确。"
+        )
+
     if draft.ready_for_review:
         data = draft.current_draft
         return (

@@ -176,6 +176,8 @@ async def _send_draft_update(client_id: str, draft) -> None:
                 "missing_slots": draft.missing_slots,
                 "ready_for_review": draft.ready_for_review,
                 "current_draft": draft.current_draft,
+                "asr": draft.asr,
+                "pending_confirmation_fields": draft.pending_confirmation_fields,
                 "created_at": draft.created_at.isoformat(),
                 "updated_at": draft.updated_at.isoformat(),
                 "confirmed_at": draft.confirmed_at.isoformat() if draft.confirmed_at else None,
@@ -371,6 +373,7 @@ async def _process_text_input(
     session: Session,
     client_id: str,
     user_text: str,
+    asr: dict | None = None,
 ) -> None:
     """所有文本输入（ASR / 直接输入）的统一处理路径。"""
     import time as _time
@@ -402,6 +405,30 @@ async def _process_text_input(
         await ws_manager.send_json(client_id, {"type": "state.update", "state": "ASKING"})
         return
 
+    if route.route == "confirm_fields":
+        session.add_user_dialog(user_text)
+        draft = draft_manager.confirm_asr_fields(
+            session.session_id,
+            user_message=user_text,
+        )
+        if draft is None:
+            reply = "当前没有需要确认的识别字段。"
+            await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+            await ws_manager.send_json(client_id, {"type": "state.update", "state": "ASKING"})
+            return
+        reply = build_draft_reply(draft)
+        session.add_assistant_dialog(reply)
+        await _send_draft_update(client_id, draft)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        await ws_manager.send_json(
+            client_id,
+            {
+                "type": "state.update",
+                "state": "awaiting_confirmation" if draft.ready_for_review else "ASKING",
+            },
+        )
+        return
+
     if route.route in ("start_task", "update_task") and route.task_type is not None:
         session.add_user_dialog(user_text)
         draft = draft_manager.get_active(session.session_id)
@@ -411,13 +438,20 @@ async def _process_text_input(
         draft = draft_manager.get_active(session.session_id)
         if draft is None:
             draft = draft_manager.start(session.session_id, route.task_type)
-        draft_manager.record_event(draft, "patch_extracted", user_message=user_text, ai_patch=patch)
+        draft_manager.record_event(
+            draft,
+            "patch_extracted",
+            user_message=user_text,
+            ai_patch=patch,
+            asr=asr,
+        )
         draft = draft_manager.apply_patch(
             session.session_id,
             route.task_type,
             patch,
             user_message=user_text,
             ai_patch=patch,
+            asr=asr,
         )
         reply = build_draft_reply(draft)
         session.add_assistant_dialog(reply)
@@ -811,7 +845,14 @@ async def voice_websocket(websocket: WebSocket) -> None:
                     client_id,
                     {"type": "user_message", "text": normalized_text, "timestamp": _now_iso()},
                 )
-                await _process_text_input(dispatcher, session, client_id, normalized_text)
+                asr_metadata = _build_asr_metadata(asr_result)
+                await _process_text_input(
+                    dispatcher,
+                    session,
+                    client_id,
+                    normalized_text,
+                    asr=asr_metadata,
+                )
                 continue
 
             # ── chat.user_text（新）或 transcript（旧）──────────────
@@ -947,3 +988,20 @@ async def push_balance_over_limit(mass_mg: float) -> None:
             "timestamp": _now_iso(),
         }
     )
+
+
+def _build_asr_metadata(asr_result: dict) -> dict:
+    corrections = asr_result.get("corrections") or []
+    suggestions = asr_result.get("suggestions") or []
+    confidences = [
+        item.get("confidence")
+        for item in [*corrections, *suggestions]
+        if isinstance(item.get("confidence"), (int, float))
+    ]
+    confidence = min(confidences) if confidences else 1.0
+    return {
+        "raw_text": asr_result.get("raw_text"),
+        "normalized_text": asr_result.get("normalized_text"),
+        "confidence": confidence,
+        "needs_confirmation": bool(asr_result.get("needs_confirmation")),
+    }

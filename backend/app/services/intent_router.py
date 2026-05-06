@@ -17,6 +17,7 @@ Route = Literal[
     "update_task",
     "cancel_task",
     "confirm_task",
+    "confirm_fields",
     "clarify",
 ]
 
@@ -55,6 +56,8 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
         return RouteResult(route="select_formula")
 
     if _contains_any(text, CONFIRM_WORDS):
+        if active_draft and active_draft.status.value == "NEEDS_FIELD_CONFIRMATION":
+            return RouteResult(route="confirm_fields", task_type=active_draft.task_type)
         if active_draft and active_draft.ready_for_review:
             return RouteResult(route="confirm_task", task_type=active_draft.task_type)
         if active_draft:

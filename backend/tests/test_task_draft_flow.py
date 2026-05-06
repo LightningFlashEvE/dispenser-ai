@@ -24,6 +24,31 @@ def test_router_detects_weighing_start():
     assert result.task_type == TaskType.WEIGHING
 
 
+def test_router_confirms_asr_fields_before_proposal():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_asr_route",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+        asr={
+            "raw_text": "我要称五克绿化钠放A1做标准液",
+            "normalized_text": "我要称5g氯化钠放A1做标准液",
+            "confidence": 0.78,
+            "needs_confirmation": True,
+        },
+    )
+    result = route_intent("确认", draft)
+
+    assert draft.status == DraftStatus.NEEDS_FIELD_CONFIRMATION
+    assert result.route == "confirm_fields"
+
+
 @pytest.mark.asyncio
 async def test_weighing_draft_collects_multiturn_patch_without_guessing():
     manager = DraftManager()
@@ -202,6 +227,156 @@ def test_empty_patch_does_not_destroy_existing_draft():
 
     assert updated.current_draft == before
     assert updated.missing_slots == ["target_vessel", "purpose"]
+
+
+def test_text_patch_without_asr_metadata_can_reach_ready_for_review():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_text_no_asr",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+    )
+
+    assert draft.asr is None
+    assert draft.pending_confirmation_fields == []
+    assert draft.status == DraftStatus.READY_FOR_REVIEW
+    assert draft.ready_for_review is True
+
+
+def test_high_confidence_asr_can_reach_ready_for_review():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_asr_high",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+        asr={
+            "raw_text": "我要称5g氯化钠放A1做标准液",
+            "normalized_text": "我要称5g氯化钠放A1做标准液",
+            "confidence": 0.99,
+            "needs_confirmation": False,
+        },
+    )
+
+    assert draft.asr["needs_confirmation"] is False
+    assert draft.pending_confirmation_fields == []
+    assert draft.status == DraftStatus.READY_FOR_REVIEW
+    assert draft.ready_for_review is True
+
+
+def test_low_confidence_asr_blocks_ready_for_review_and_preserves_raw_text():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_asr_low",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+        user_message="我要称5g氯化钠放A1做标准液",
+        ai_patch={
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+        asr={
+            "raw_text": "我要称五克绿化钠放A1做标准液",
+            "normalized_text": "我要称5g氯化钠放A1做标准液",
+            "confidence": 0.78,
+            "needs_confirmation": True,
+        },
+    )
+
+    assert draft.current_draft["chemical_name"] == "氯化钠"
+    assert draft.status == DraftStatus.NEEDS_FIELD_CONFIRMATION
+    assert draft.ready_for_review is False
+    assert draft.asr == {
+        "raw_text": "我要称五克绿化钠放A1做标准液",
+        "normalized_text": "我要称5g氯化钠放A1做标准液",
+        "confidence": 0.78,
+        "needs_confirmation": True,
+    }
+    assert set(draft.pending_confirmation_fields) == {
+        "chemical_name",
+        "mass_unit",
+        "target_mass",
+        "target_vessel",
+    }
+    assert draft.events[-1].asr_raw_text == "我要称五克绿化钠放A1做标准液"
+    assert draft.events[-1].asr_normalized_text == "我要称5g氯化钠放A1做标准液"
+    assert draft.events[-1].asr_confidence == 0.78
+    assert draft.events[-1].asr_needs_confirmation is True
+
+
+def test_confirming_asr_fields_allows_ready_for_review():
+    manager = DraftManager()
+    manager.apply_patch(
+        "session_asr_confirm",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+        asr={
+            "raw_text": "我要称五克绿化钠放A1做标准液",
+            "normalized_text": "我要称5g氯化钠放A1做标准液",
+            "confidence": 0.78,
+            "needs_confirmation": True,
+        },
+    )
+
+    confirmed = manager.confirm_asr_fields("session_asr_confirm", user_message="确认")
+
+    assert confirmed.status == DraftStatus.READY_FOR_REVIEW
+    assert confirmed.ready_for_review is True
+    assert confirmed.pending_confirmation_fields == []
+    assert confirmed.asr["needs_confirmation"] is False
+    assert "asr_fields_confirmed" in [event.event_type for event in confirmed.events]
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_low_confidence_mass_is_not_silently_written():
+    manager = DraftManager()
+    extractor = AIExtractor()
+    patch = await extractor.extract_patch(
+        TaskType.WEIGHING,
+        {},
+        "我要称五颗氯化钠",
+    )
+    draft = manager.apply_patch(
+        "session_asr_ambiguous_mass",
+        TaskType.WEIGHING,
+        patch,
+        asr={
+            "raw_text": "我要称五颗氯化钠",
+            "normalized_text": "我要称五颗氯化钠",
+            "confidence": 0.72,
+            "needs_confirmation": True,
+        },
+    )
+
+    assert "target_mass" not in patch
+    assert draft.current_draft["target_mass"] is None
+    assert "target_mass" in draft.missing_slots
 
 
 def test_duplicate_proposal_creation_is_idempotent():

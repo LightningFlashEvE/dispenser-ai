@@ -20,7 +20,13 @@ class DraftManager:
     validation, and conversion to a formal backend intent proposal.
     """
 
-    ACTIVE_STATUSES = (DraftStatus.COLLECTING, DraftStatus.READY_FOR_REVIEW)
+    ACTIVE_STATUSES = (
+        DraftStatus.COLLECTING,
+        DraftStatus.NEEDS_FIELD_CONFIRMATION,
+        DraftStatus.READY_FOR_REVIEW,
+    )
+    ASR_CRITICAL_FIELDS = {"chemical_name", "target_mass", "mass_unit", "target_vessel"}
+    ASR_CONFIDENCE_THRESHOLD = 0.85
 
     def __init__(self, store: SQLiteDraftStore | None = None) -> None:
         self._store = store
@@ -62,6 +68,7 @@ class DraftManager:
         *,
         user_message: str | None = None,
         ai_patch: dict[str, Any] | None = None,
+        asr: dict[str, Any] | None = None,
     ) -> TaskDraftRecord:
         draft = self.get_active(session_id)
         if draft is None:
@@ -80,12 +87,14 @@ class DraftManager:
                 applied_patch[key] = value
 
         draft = self._validate_and_stamp(draft)
+        self._apply_asr_guard(draft, applied_patch, asr)
         self.record_event(
             draft,
             "patch_applied",
             user_message=user_message,
             ai_patch=ai_patch if ai_patch is not None else patch,
             applied_patch=applied_patch,
+            asr=asr,
         )
         self.record_event(
             draft,
@@ -93,6 +102,28 @@ class DraftManager:
             user_message=user_message,
             ai_patch=ai_patch if ai_patch is not None else patch,
             applied_patch=applied_patch,
+            asr=asr,
+        )
+        return draft
+
+    def confirm_asr_fields(
+        self,
+        session_id: str,
+        *,
+        user_message: str | None = None,
+    ) -> TaskDraftRecord | None:
+        draft = self.get_active(session_id)
+        if draft is None or draft.status != DraftStatus.NEEDS_FIELD_CONFIRMATION:
+            return draft
+        draft.pending_confirmation_fields = []
+        if draft.asr is not None:
+            draft.asr = {**draft.asr, "needs_confirmation": False}
+        draft = self._validate_and_stamp(draft)
+        self.record_event(draft, "asr_fields_confirmed", user_message=user_message)
+        self.record_event(
+            draft,
+            "ready_for_review" if draft.ready_for_review else "validation_failed",
+            user_message=user_message,
         )
         return draft
 
@@ -149,6 +180,7 @@ class DraftManager:
         user_message: str | None = None,
         ai_patch: dict[str, Any] | None = None,
         applied_patch: dict[str, Any] | None = None,
+        asr: dict[str, Any] | None = None,
     ) -> None:
         draft.events.append(
             DraftEvent(
@@ -158,6 +190,10 @@ class DraftManager:
                 user_message=user_message,
                 ai_patch=ai_patch,
                 applied_patch=applied_patch,
+                asr_raw_text=(asr or {}).get("raw_text") if asr else None,
+                asr_normalized_text=(asr or {}).get("normalized_text") if asr else None,
+                asr_confidence=(asr or {}).get("confidence") if asr else None,
+                asr_needs_confirmation=(asr or {}).get("needs_confirmation") if asr else None,
                 missing_slots=list(draft.missing_slots),
             )
         )
@@ -175,7 +211,7 @@ class DraftManager:
         for draft in list(self._drafts_by_id.values()):
             if draft.status == DraftStatus.COLLECTING:
                 ttl = collecting_ttl
-            elif draft.status == DraftStatus.READY_FOR_REVIEW:
+            elif draft.status in (DraftStatus.NEEDS_FIELD_CONFIRMATION, DraftStatus.READY_FOR_REVIEW):
                 ttl = review_ttl
             else:
                 continue
@@ -209,6 +245,33 @@ class DraftManager:
         )
         draft.updated_at = datetime.now(timezone.utc)
         return draft
+
+    def _apply_asr_guard(
+        self,
+        draft: TaskDraftRecord,
+        applied_patch: dict[str, Any],
+        asr: dict[str, Any] | None,
+    ) -> None:
+        if not asr:
+            return
+        critical_fields = sorted(self.ASR_CRITICAL_FIELDS.intersection(applied_patch))
+        confidence = asr.get("confidence")
+        low_confidence = (
+            isinstance(confidence, (int, float))
+            and confidence < self.ASR_CONFIDENCE_THRESHOLD
+        )
+        needs_confirmation = bool(asr.get("needs_confirmation")) or low_confidence
+        draft.asr = {
+            "raw_text": asr.get("raw_text"),
+            "normalized_text": asr.get("normalized_text"),
+            "confidence": confidence,
+            "needs_confirmation": needs_confirmation and bool(critical_fields),
+        }
+        if not needs_confirmation or not critical_fields:
+            return
+        draft.pending_confirmation_fields = critical_fields
+        draft.ready_for_review = False
+        draft.status = DraftStatus.NEEDS_FIELD_CONFIRMATION
 
     def _register(self, draft: TaskDraftRecord) -> None:
         self._drafts_by_id[draft.draft_id] = draft

@@ -16,6 +16,7 @@ class TaskType(str, Enum):
 class DraftStatus(str, Enum):
     NORMAL_CHAT = "NORMAL_CHAT"
     COLLECTING = "COLLECTING"
+    NEEDS_FIELD_CONFIRMATION = "NEEDS_FIELD_CONFIRMATION"
     READY_FOR_REVIEW = "READY_FOR_REVIEW"
     PROPOSAL_CREATED = "PROPOSAL_CREATED"
     VERIFYING = "VERIFYING"
@@ -43,6 +44,10 @@ class DraftEvent(BaseModel):
     user_message: str | None = None
     ai_patch: dict[str, Any] | None = None
     applied_patch: dict[str, Any] | None = None
+    asr_raw_text: str | None = None
+    asr_normalized_text: str | None = None
+    asr_confidence: float | None = None
+    asr_needs_confirmation: bool | None = None
     missing_slots: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -57,6 +62,8 @@ class TaskDraftRecord(BaseModel):
     ready_for_review: bool = False
     current_draft: dict[str, Any] = Field(default_factory=dict)
     proposal_intent: dict[str, Any] | None = None
+    asr: dict[str, Any] | None = None
+    pending_confirmation_fields: list[str] = Field(default_factory=list)
     events: list[DraftEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

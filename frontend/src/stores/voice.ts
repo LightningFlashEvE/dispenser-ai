@@ -8,6 +8,7 @@ export type MsgRole = 'user' | 'assistant' | 'system'
 export interface AsrMeta {
   rawText: string
   normalizedText: string
+  confidence: number | null
   corrections: Correction[]
   suggestions: Suggestion[]
   needsConfirmation: boolean
@@ -172,6 +173,7 @@ export const useVoiceStore = defineStore('voice', () => {
           asrMeta.value = {
             rawText: msg.raw_text,
             normalizedText: msg.normalized_text,
+            confidence: null,
             corrections: msg.corrections || [],
             suggestions: msg.suggestions || [],
             needsConfirmation: msg.needs_confirmation || false,
