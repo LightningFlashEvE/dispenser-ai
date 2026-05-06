@@ -16,10 +16,16 @@ _stream_task: asyncio.Task | None = None
 
 async def _weight_stream_loop() -> None:
     url = f"{settings.control_adapter_ws_url}/ws/weight"
+    retry_delay = 1.0
+    max_delay = 30.0
+    connected = False
     while True:
         try:
             async with websockets.connect(url, ping_interval=20, ping_timeout=20) as websocket:
-                logger.info("已连接 mock-qt 重量流：%s", url)
+                if not connected:
+                    logger.info("已连接 mock-qt 重量流：%s", url)
+                    connected = True
+                retry_delay = 1.0
                 async for raw_msg in websocket:
                     try:
                         payload = json.loads(raw_msg)
@@ -35,8 +41,10 @@ async def _weight_stream_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("mock-qt 重量流断开，1s 后重连：%s", exc)
-            await asyncio.sleep(1.0)
+            connected = False
+            logger.warning("mock-qt 重量流断开，%.0fs 后重连：%s", retry_delay, exc)
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, max_delay)
 
 
 async def start_weight_stream() -> None:

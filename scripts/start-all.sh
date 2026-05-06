@@ -203,7 +203,9 @@ fi
 # ── 5. backend ────────────────────────────────────────────────────
 info "[5/7] backend (FastAPI :8000)"
 PID_FILE_BE=".backend.pid"
-if [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null; then
+if is_port_listening 8000 && curl -ksf "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
+    ok "backend 已在监听 :8000（运行中）"
+elif [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null; then
     ok "backend 已在运行 (PID: $(cat "${PID_FILE_BE}"))"
 else
     BACKEND_UVICORN="${SCRIPT_DIR}/backend/venv/bin/uvicorn"

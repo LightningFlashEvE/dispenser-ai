@@ -863,7 +863,7 @@ async def voice_websocket(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         ws_manager.disconnect(client_id)
     except RuntimeError as e:
-        if "WebSocket is not connected" in str(e):
+        if "WebSocket is not connected" in str(e) or "disconnect message has been received" in str(e):
             logger.warning("WebSocket 客户端提前断开: %s", client_id)
             ws_manager.disconnect(client_id)
         else:

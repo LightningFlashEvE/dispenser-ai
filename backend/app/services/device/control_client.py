@@ -47,6 +47,7 @@ class ControlClient:
             "current_task": None,
             "last_completed_task": None,
         }
+        self._status_fail_count = 0
 
     async def send_command(self, command: dict[str, Any]) -> tuple[bool, str | None]:
         """下发指令。
@@ -100,6 +101,7 @@ class ControlClient:
             resp = await self._client.get("/api/status")
             resp.raise_for_status()
             status = resp.json()
+            self._status_fail_count = 0
             if status.get("current_weight_mg") is None:
                 status["current_weight_mg"] = self._last_status.get("current_weight_mg")
             if status.get("last_completed_task") is None:
@@ -107,13 +109,17 @@ class ControlClient:
             self._last_status = {**self._last_status, **status}
             return status
         except httpx.HTTPError as e:
-            logger.warning("获取设备状态失败: %s", type(e).__name__)
+            self._status_fail_count += 1
+            if self._status_fail_count % 10 == 1:
+                logger.warning("获取设备状态失败 (连续 %d 次): %s", self._status_fail_count, type(e).__name__)
             return {
                 **self._last_status,
                 "device_status": "unknown",
             }
         except Exception:
-            logger.exception("获取设备状态未知异常")
+            self._status_fail_count += 1
+            if self._status_fail_count % 10 == 1:
+                logger.exception("获取设备状态未知异常 (连续 %d 次)", self._status_fail_count)
             return {
                 **self._last_status,
                 "device_status": "unknown",
