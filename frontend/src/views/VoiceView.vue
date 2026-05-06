@@ -266,9 +266,11 @@ const draftStatusLabel = computed(() => {
     COLLECTING: '正在收集信息',
     READY_FOR_REVIEW: '等待用户确认',
     NEEDS_FIELD_CONFIRMATION: '等待识别确认',
-    PROPOSAL_CREATED: '已生成待审批任务',
+    PROPOSAL_CREATED: '正在校验任务规则',
+    VERIFYING: '正在校验任务规则',
+    DISPATCHED: '已下发执行',
     CANCELLED: '已取消',
-    FAILED: '失败',
+    FAILED: '规则校验失败，不允许执行',
   }
   return status ? (map[status] ?? status) : ''
 })
@@ -276,7 +278,8 @@ const draftStatusTone = computed(() => {
   const status = voiceStore.currentDraft?.status
   if (status === 'NEEDS_FIELD_CONFIRMATION') return 'asr'
   if (status === 'READY_FOR_REVIEW') return 'review'
-  if (status === 'PROPOSAL_CREATED') return 'proposal'
+  if (status === 'PROPOSAL_CREATED' || status === 'VERIFYING') return 'proposal'
+  if (status === 'DISPATCHED') return 'review'
   if (status === 'CANCELLED') return 'cancelled'
   if (status === 'FAILED') return 'failed'
   return 'collecting'
@@ -299,7 +302,7 @@ const canConfirmDraft = computed(() => Boolean(
 ))
 const draftConfirmLabel = computed(() => (
   voiceStore.currentDraft?.status === 'PROPOSAL_CREATED'
-    ? '等待审批'
+    ? '规则校验中'
     : hasDraftAsrConfirmation.value ? '确认识别内容' : '✓ 确认'
 ))
 

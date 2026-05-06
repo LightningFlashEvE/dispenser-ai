@@ -218,7 +218,11 @@ export const useVoiceStore = defineStore('voice', () => {
         break
       case 'pending_cleared': pendingIntent.value = null; break
       case 'slot_filling': break
-      case 'command_sent': _addMsg('system', `✓ 指令已下发  [${msg.command_id.slice(-8)}]`); break
+      case 'command_sent':
+        currentDraft.value = null
+        pendingIntent.value = null
+        _addMsg('system', `✓ 指令已下发  [${msg.command_id.slice(-8)}]`)
+        break
       case 'command_result': {
         const d = msg.data; const ok = d.status === 'completed'
         _addMsg('system', ok ? '✓ 执行完成' : `✗ 执行${d.status}${d.message ? '：' + d.message : ''}`, undefined, !ok)

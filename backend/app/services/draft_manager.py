@@ -145,6 +145,44 @@ class DraftManager:
         self.record_event(draft, "draft_cancelled")
         return draft
 
+    def mark_dispatched(
+        self,
+        session_id: str,
+        *,
+        command_id: str | None = None,
+    ) -> TaskDraftRecord | None:
+        draft = self._drafts_by_session.get(session_id)
+        if draft is None:
+            return None
+        draft.status = DraftStatus.DISPATCHED
+        draft.ready_for_review = False
+        draft.updated_at = datetime.now(timezone.utc)
+        self.record_event(
+            draft,
+            "command_dispatched",
+            applied_patch={"command_id": command_id} if command_id else None,
+        )
+        return draft
+
+    def mark_failed(
+        self,
+        session_id: str,
+        *,
+        error_message: str | None = None,
+    ) -> TaskDraftRecord | None:
+        draft = self._drafts_by_session.get(session_id)
+        if draft is None:
+            return None
+        draft.status = DraftStatus.FAILED
+        draft.ready_for_review = False
+        draft.updated_at = datetime.now(timezone.utc)
+        self.record_event(
+            draft,
+            "rule_check_failed",
+            applied_patch={"error_message": error_message} if error_message else None,
+        )
+        return draft
+
     def clear(self, session_id: str) -> None:
         draft = self._drafts_by_session.pop(session_id, None)
         if draft is not None and self._store is not None:

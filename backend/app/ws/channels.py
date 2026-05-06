@@ -488,6 +488,20 @@ async def _process_text_input(
         await _send_draft_update(client_id, active_draft)
         await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
         result = await dispatcher.create_pending_from_intent(session, intent_data)
+        if result.command_id:
+            dispatched = draft_manager.mark_dispatched(
+                session.session_id,
+                command_id=result.command_id,
+            )
+            if dispatched is not None:
+                await _send_draft_update(client_id, dispatched)
+        elif result.error_code:
+            failed = draft_manager.mark_failed(
+                session.session_id,
+                error_message=result.error_message,
+            )
+            if failed is not None:
+                await _send_draft_update(client_id, failed)
         await _apply_dispatch_result(client_id, result)
         return
 

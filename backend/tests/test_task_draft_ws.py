@@ -85,6 +85,11 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
     monkeypatch.setattr(channels, "ws_manager", fake_ws)
     monkeypatch.setattr(dispatcher_module, "find_best_drug", fake_find_best_drug)
     monkeypatch.setattr(dispatcher_module, "drug_to_dict", fake_drug_to_dict)
+    monkeypatch.setattr(
+        dispatcher_module,
+        "_create_task_record",
+        lambda intent_data, command: _async_value("task_weighing_ws"),
+    )
 
     session_id = "ws_draft_test"
     draft_manager.clear(session_id)
@@ -114,24 +119,61 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
 
     await channels._process_text_input(dispatcher, session, "client_1", "确认")
     proposal_draft = _last_message(fake_ws.messages, "draft_update")
-    assert proposal_draft["data"]["status"] == "PROPOSAL_CREATED"
-    proposal_reply = _last_message(fake_ws.messages, "chat.done")
-    assert "正式任务 proposal" in proposal_reply["text"]
-    assert "5000mg" in proposal_reply["text"]
+    assert proposal_draft["data"]["status"] == "DISPATCHED"
+    assert any(
+        msg.get("type") == "chat.done"
+        and "正式任务 proposal" in msg.get("text", "")
+        and "5000mg" in msg.get("text", "")
+        for msg in fake_ws.messages
+    )
 
-    pending = _last_message(fake_ws.messages, "pending_intent")
-    assert pending["data"]["intent_type"] == "dispense"
-    assert pending["data"]["params"]["target_mass_mg"] == 5000
-    assert pending["data"]["params"]["target_vessel"] == "A1"
+    command_sent = _last_message(fake_ws.messages, "command_sent")
+    assert command_sent["command_id"] == control.commands[0]["command_id"]
+    assert _last_message(fake_ws.messages, "pending_cleared")
+    assert len(control.commands) == 1
+    command = control.commands[0]
+    assert command["command_type"] == "dispense"
+    assert command["payload"]["target_mass_mg"] == 5000
+    assert command["payload"]["target_vessel"] == "A1"
+    assert command["payload"]["reagent_name_cn"] == "氯化钠"
+    assert any(
+        msg.get("type") == "chat.done" and "已下发指令" in msg.get("text", "")
+        for msg in fake_ws.messages
+    )
 
     await channels._process_text_input(dispatcher, session, "client_1", "确认")
-    held_reply = _last_message(fake_ws.messages, "chat.done")
-    assert "已生成称量 proposal" in held_reply["text"]
-    assert "不会下发控制命令" in held_reply["text"]
-    assert _last_message(fake_ws.messages, "pending_cleared")
-    assert control.commands == []
-    assert not any(msg.get("type") == "command_sent" for msg in fake_ws.messages)
+    assert len(control.commands) == 1
     assert not any(msg.get("type") == "error" for msg in fake_ws.messages)
+
+
+@pytest.mark.asyncio
+async def test_weighing_rule_failure_blocks_command():
+    session = Session(session_id="ws_draft_rule_failure")
+    control = FakeControlClient()
+    dispatcher = IntentDispatcher(
+        llm=FakeLLM(),
+        state_machine=StateMachine(),
+        control_client=control,
+    )
+    session.set_pending(
+        intent_data={
+            "intent_type": "dispense",
+            "task_type": "WEIGHING",
+            "draft_id": "draft_rule_failure",
+            "is_complete": True,
+            "reagent_hint": {"raw_text": "氯化钠"},
+            "params": {"target_mass_mg": 5000, "target_vessel": "A1"},
+        },
+        drug_info=None,
+    )
+
+    result = await dispatcher.handle_confirm(session)
+
+    assert result.output_type == "reject"
+    assert result.error_code == "RULE_CHECK_FAILED"
+    assert "称量任务缺少已匹配试剂信息" in result.error_message
+    assert result.pending_payload == "clear"
+    assert control.commands == []
 
 
 @pytest.mark.asyncio
@@ -184,3 +226,7 @@ def _last_message(messages: list[dict], msg_type: str) -> dict:
         if msg.get("type") == msg_type:
             return msg
     raise AssertionError(f"message type not found: {msg_type}")
+
+
+async def _async_value(value):
+    return value

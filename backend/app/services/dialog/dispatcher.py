@@ -322,10 +322,11 @@ class IntentDispatcher:
         session: Session,
         intent_data: dict[str, Any],
     ) -> DispatchResult:
-        """Create a backend-owned pending proposal from a validated draft intent.
+        """Create and execute a self-approved backend proposal from a draft.
 
-        The draft layer owns field completeness. This method only converts the
-        formal backend intent into the existing pending approval object.
+        The draft layer owns field completeness. The user's draft confirmation
+        is the local-device approval, but execution still goes through backend
+        rule checks before command construction and dispatch.
         """
         pending = await self._pending_from_intent(
             session,
@@ -337,12 +338,7 @@ class IntentDispatcher:
                 error_message="无法根据任务草稿生成正式 proposal",
                 state="ERROR",
             )
-        return DispatchResult(
-            pending_payload=pending.to_wire(),
-            state="ASKING",
-            output_type="action_proposal",
-            pending_only=True,
-        )
+        return await self._execute_pending(session, pending)
 
     # ─── 确认态输入解析（P3：状态驱动） ─────────────────────────
 
@@ -383,13 +379,6 @@ class IntentDispatcher:
                 pending_payload="clear",
                 output_type="reject",
             )
-        if pending.intent_data.get("intent_type") == "formula":
-            return await self._hold_formula_for_approval(session, pending)
-        if (
-            pending.intent_data.get("task_type") == "WEIGHING"
-            and pending.intent_data.get("draft_id")
-        ):
-            return await self._hold_weighing_for_approval(session, pending)
         return await self._execute_pending(session, pending)
 
     async def handle_cancel_pending(self, session: Session) -> DispatchResult:
@@ -521,24 +510,55 @@ class IntentDispatcher:
     ) -> DispatchResult:
         intent_data = pending.intent_data
         drug_info = pending.drug_info
+        session.clear_pending()
+
+        intent_data["approval_mode"] = "self_approved"
+        intent_data["approved_by"] = "current_operator"
+        intent_data["approved_at"] = _now_iso()
 
         can_start, reason = self._sm.can_start_task()
         if not can_start:
+            intent_data["approval_mode"] = "blocked"
+            intent_data["rule_check_status"] = "FAILED"
+            intent_data["error_message"] = reason
             return DispatchResult(
                 error_code="DEVICE_BUSY",
                 error_message=reason,
                 state="ERROR",
+                pending_payload="clear",
                 output_type="reject",
             )
+
+        ok, rule_error = self._run_rule_check(intent_data, drug_info)
+        if not ok:
+            intent_data["approval_mode"] = "blocked"
+            intent_data["rule_check_status"] = "FAILED"
+            intent_data["error_message"] = rule_error
+            return DispatchResult(
+                dialog_text=f"规则校验失败，不允许执行：{rule_error}",
+                speak_text=f"规则校验失败，不允许执行：{rule_error}",
+                error_code="RULE_CHECK_FAILED",
+                error_message=rule_error,
+                state="ERROR",
+                pending_payload="clear",
+                output_type="reject",
+                debug={"intent": intent_data},
+            )
+
+        intent_data["rule_check_status"] = "PASSED"
 
         try:
             command = await build_command(intent_data, drug_info)
         except ValueError as e:
             logger.exception("build_command 失败")
+            intent_data["approval_mode"] = "blocked"
+            intent_data["rule_check_status"] = "FAILED"
+            intent_data["error_message"] = str(e)
             return DispatchResult(
                 error_code="COMMAND_BUILD_FAILED",
                 error_message=str(e),
                 state="ERROR",
+                pending_payload="clear",
                 output_type="reject",
             )
 
@@ -549,6 +569,7 @@ class IntentDispatcher:
                 error_code="STATE_MACHINE_REJECTED",
                 error_message="状态机拒绝启动任务",
                 state="ERROR",
+                pending_payload="clear",
                 output_type="reject",
             )
 
@@ -560,6 +581,7 @@ class IntentDispatcher:
                 error_code="COMMAND_SEND_FAILED",
                 error_message=reason or "命令下发失败",
                 state="ERROR",
+                pending_payload="clear",
                 output_type="reject",
             )
 
@@ -572,49 +594,40 @@ class IntentDispatcher:
             output_type="execute_now",
         )
 
-    async def _hold_formula_for_approval(
-        self, session: Session, pending: PendingIntent
-    ) -> DispatchResult:
-        intent_data = pending.intent_data
-        params = intent_data.get("params") or {}
-        formula_name = params.get("formula_name") or params.get("formula_id") or "该配方"
-        step_count = len(params.get("steps") or [])
-        text = (
-            f"已生成配方 proposal：{formula_name}，共 {step_count} 步。"
-            "下一步将进入规则校验和人工审批，当前不会下发控制命令。"
-        )
-        intent_data["proposal_status"] = "WAITING_RULE_CHECK"
-        session.reset()
-        return DispatchResult(
-            dialog_text=text,
-            speak_text=text,
-            state="ASKING",
-            pending_payload="clear",
-            output_type="confirmation_required",
-            debug={"formula_proposal": intent_data},
-        )
+    def _run_rule_check(
+        self,
+        intent_data: dict[str, Any],
+        drug_info: dict | None,
+    ) -> tuple[bool, str | None]:
+        is_valid, errors, clarification = validate_intent(intent_data, strict_schema=False)
+        if clarification:
+            return False, clarification
+        if not is_valid:
+            return False, "；".join(errors) or "意图校验失败"
 
-    async def _hold_weighing_for_approval(
-        self, session: Session, pending: PendingIntent
-    ) -> DispatchResult:
-        intent_data = pending.intent_data
+        intent_type = intent_data.get("intent_type")
         params = intent_data.get("params") or {}
-        reagent = (intent_data.get("reagent_hint") or {}).get("raw_text") or "该化学品"
-        target_mass = params.get("target_mass_mg")
-        text = (
-            f"已生成称量 proposal：{reagent}，目标质量 {target_mass} mg。"
-            "下一步将进入规则校验和人工审批，当前不会下发控制命令。"
-        )
-        intent_data["proposal_status"] = "WAITING_RULE_CHECK"
-        session.reset()
-        return DispatchResult(
-            dialog_text=text,
-            speak_text=text,
-            state="ASKING",
-            pending_payload="clear",
-            output_type="confirmation_required",
-            debug={"weighing_proposal": intent_data},
-        )
+        if intent_type == "formula":
+            steps = params.get("steps")
+            if not params.get("formula_id"):
+                return False, "配方缺少 formula_id"
+            if not isinstance(steps, list) or not steps:
+                return False, "配方步骤为空"
+            for index, step in enumerate(steps, start=1):
+                if not isinstance(step, dict):
+                    return False, f"配方第 {index} 步格式无效"
+                if not step.get("command_type"):
+                    return False, f"配方第 {index} 步缺少 command_type"
+
+        if intent_type == "dispense" and intent_data.get("task_type") == "WEIGHING":
+            if not drug_info:
+                return False, "称量任务缺少已匹配试剂信息"
+            if not params.get("target_mass_mg"):
+                return False, "称量任务缺少目标质量"
+            if not params.get("target_vessel"):
+                return False, "称量任务缺少目标容器"
+
+        return True, None
 
     # ─── 查询类直接执行 ──────────────────────────────────────────
 

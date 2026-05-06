@@ -177,28 +177,62 @@ async def test_select_formula_by_id_and_name():
 
 
 @pytest.mark.asyncio
-async def test_formula_confirm_creates_proposal_without_command():
+async def test_formula_confirm_executes_after_rule_check(monkeypatch):
+    import app.services.dialog.dispatcher as dispatcher_module
+
     formulas = _formulas()
     control = FakeControlClient()
     dispatcher = _dispatcher(formulas, control)
+    monkeypatch.setattr(
+        dispatcher_module,
+        "_create_task_record",
+        lambda intent_data, command: _async_value("task_formula_confirm"),
+    )
     session = Session("formula_confirm_session")
     await dispatcher.handle_query_formula(session, "查看配方")
     await dispatcher.handle_select_formula(session, "应用第三个配方")
 
     result = await dispatcher.handle_confirm(session)
-    assert result.output_type == "confirmation_required"
+    assert result.output_type == "execute_now"
+    assert result.pending_payload == "clear"
+    assert result.command_id == control.commands[0]["command_id"]
+    command = control.commands[0]
+    assert command["command_type"] == "formula"
+    assert command["payload"]["formula_id"] == "F004"
+    assert command["payload"]["formula_name"] == "氯化钾注射液"
+    assert len(command["payload"]["steps"]) == 2
+    assert command["payload"]["execution_mode"] == "sequential"
+    assert command["payload"]["on_step_failure"] == "pause_and_notify"
+
+
+@pytest.mark.asyncio
+async def test_formula_rule_failure_blocks_command():
+    formulas = [_formula("F404", "空步骤配方", 0)]
+    control = FakeControlClient()
+    dispatcher = _dispatcher(formulas, control)
+    session = Session("formula_rule_failure_session")
+    session.set_pending(
+        intent_data={
+            "intent_type": "formula",
+            "task_type": "FORMULA",
+            "is_complete": True,
+            "params": {
+                "formula_id": "F404",
+                "formula_name": "空步骤配方",
+                "steps": [],
+                "execution_mode": "sequential",
+                "on_step_failure": "pause_and_notify",
+            },
+        }
+    )
+
+    result = await dispatcher.handle_confirm(session)
+
+    assert result.output_type == "reject"
+    assert result.error_code == "RULE_CHECK_FAILED"
+    assert "配方步骤为空" in result.error_message
     assert result.pending_payload == "clear"
     assert control.commands == []
-    proposal = result.debug["formula_proposal"]
-    assert proposal["intent_type"] == "formula"
-    assert proposal["proposal_status"] == "WAITING_RULE_CHECK"
-    assert proposal["is_complete"] is True
-    assert proposal["params"]["formula_id"] == "F004"
-    assert proposal["params"]["formula_name"] == "氯化钾注射液"
-    assert len(proposal["params"]["steps"]) == 2
-    assert proposal["params"]["execution_mode"] == "sequential"
-    assert proposal["params"]["on_step_failure"] == "pause_and_notify"
-    assert "不会下发控制命令" in result.dialog_text
 
 
 @pytest.mark.asyncio
@@ -261,3 +295,7 @@ def _last_message(messages: list[dict], msg_type: str) -> dict:
         if msg.get("type") == msg_type:
             return msg
     raise AssertionError(f"message type not found: {msg_type}")
+
+
+async def _async_value(value):
+    return value
