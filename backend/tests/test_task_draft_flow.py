@@ -50,6 +50,57 @@ def test_router_confirms_asr_fields_before_proposal():
 
 
 @pytest.mark.asyncio
+async def test_extract_weighing_name_mass_unit():
+    extractor = AIExtractor()
+    patch = await extractor.extract_patch(
+        TaskType.WEIGHING,
+        {},
+        "帮我称 5g 氯化钠",
+    )
+
+    assert patch["chemical_name"] == "氯化钠"
+    assert patch["target_mass"] == 5
+    assert patch["mass_unit"] == "g"
+
+
+@pytest.mark.asyncio
+async def test_extract_weighing_target_vessel_and_purpose():
+    extractor = AIExtractor()
+    patch = await extractor.extract_patch(
+        TaskType.WEIGHING,
+        {},
+        "放 A1，做标准液",
+    )
+
+    assert patch["target_vessel"] == "A1"
+    assert patch["purpose"] == "标准液"
+
+
+@pytest.mark.asyncio
+async def test_empty_llm_patch_is_filled_by_rule_fallback():
+    class EmptyPatchLLM:
+        async def _call(self, messages, *, force_json):
+            return '{"patch": {}}'
+
+    extractor = AIExtractor(EmptyPatchLLM())
+    patch = await extractor.extract_patch(
+        TaskType.WEIGHING,
+        {},
+        "帮我称 5g 氯化钠",
+    )
+
+    assert extractor.last_raw_output == '{"patch": {}}'
+    assert extractor.last_sanitized_patch == {
+        "target_mass": 5.0,
+        "mass_unit": "g",
+        "chemical_name": "氯化钠",
+    }
+    assert patch["chemical_name"] == "氯化钠"
+    assert patch["target_mass"] == 5
+    assert patch["mass_unit"] == "g"
+
+
+@pytest.mark.asyncio
 async def test_weighing_draft_collects_multiturn_patch_without_guessing():
     manager = DraftManager()
     extractor = AIExtractor()

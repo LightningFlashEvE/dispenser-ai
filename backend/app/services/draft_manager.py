@@ -68,6 +68,8 @@ class DraftManager:
         *,
         user_message: str | None = None,
         ai_patch: dict[str, Any] | None = None,
+        raw_ai_extractor_output: str | None = None,
+        sanitized_patch: dict[str, Any] | None = None,
         asr: dict[str, Any] | None = None,
     ) -> TaskDraftRecord:
         draft = self.get_active(session_id)
@@ -93,6 +95,8 @@ class DraftManager:
             "patch_applied",
             user_message=user_message,
             ai_patch=ai_patch if ai_patch is not None else patch,
+            raw_ai_extractor_output=raw_ai_extractor_output,
+            sanitized_patch=sanitized_patch if sanitized_patch is not None else patch,
             applied_patch=applied_patch,
             asr=asr,
         )
@@ -101,6 +105,8 @@ class DraftManager:
             "ready_for_review" if draft.ready_for_review else "validation_failed",
             user_message=user_message,
             ai_patch=ai_patch if ai_patch is not None else patch,
+            raw_ai_extractor_output=raw_ai_extractor_output,
+            sanitized_patch=sanitized_patch if sanitized_patch is not None else patch,
             applied_patch=applied_patch,
             asr=asr,
         )
@@ -179,6 +185,8 @@ class DraftManager:
         *,
         user_message: str | None = None,
         ai_patch: dict[str, Any] | None = None,
+        raw_ai_extractor_output: str | None = None,
+        sanitized_patch: dict[str, Any] | None = None,
         applied_patch: dict[str, Any] | None = None,
         asr: dict[str, Any] | None = None,
     ) -> None:
@@ -189,6 +197,8 @@ class DraftManager:
                 session_id=draft.session_id,
                 user_message=user_message,
                 ai_patch=ai_patch,
+                raw_ai_extractor_output=raw_ai_extractor_output,
+                sanitized_patch=sanitized_patch,
                 applied_patch=applied_patch,
                 asr_raw_text=(asr or {}).get("raw_text") if asr else None,
                 asr_normalized_text=(asr or {}).get("normalized_text") if asr else None,

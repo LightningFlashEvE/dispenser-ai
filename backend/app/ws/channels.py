@@ -443,6 +443,8 @@ async def _process_text_input(
             "patch_extracted",
             user_message=user_text,
             ai_patch=patch,
+            raw_ai_extractor_output=extractor.last_raw_output,
+            sanitized_patch=extractor.last_sanitized_patch,
             asr=asr,
         )
         draft = draft_manager.apply_patch(
@@ -451,6 +453,8 @@ async def _process_text_input(
             patch,
             user_message=user_text,
             ai_patch=patch,
+            raw_ai_extractor_output=extractor.last_raw_output,
+            sanitized_patch=extractor.last_sanitized_patch,
             asr=asr,
         )
         reply = build_draft_reply(draft)
