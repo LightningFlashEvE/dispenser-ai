@@ -669,12 +669,8 @@ class IntentDispatcher:
     async def handle_query_formula(
         self, session: Session, keyword: str | None
     ) -> DispatchResult:
-        if not keyword:
-            return DispatchResult(
-                dialog_text="请提供要查询的配方名称",
-                speak_text="请提供要查询的配方名称",
-                state="ASKING", output_type="question",
-            )
+        query = _normalize_formula_keyword(keyword)
+
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
             from app.models.formula import Formula, FormulaStep
@@ -688,13 +684,39 @@ class IntentDispatcher:
 
         if not all_formulas:
             session.reset()
+            text = "当前没有可用配方"
             return DispatchResult(
-                dialog_text="当前没有可用配方",
-                speak_text="当前没有可用配方",
+                dialog_text=text,
+                speak_text=text,
                 state="FEEDBACK", pending_payload="clear", output_type="reply",
             )
 
-        kw = keyword.lower().strip()
+        # 通用配方查询：返回列表
+        if query is None:
+            preview = all_formulas[:10]
+            lines = [
+                f"当前共有 {len(all_formulas)} 个配方：",
+                *[
+                    f"  • {f.formula_name}（{f.formula_id}），共 {len(f.steps)} 步"
+                    for f in preview
+                ],
+            ]
+            if len(all_formulas) > len(preview):
+                lines.append("更多配方请在配方管理页面查看。")
+
+            dialog_text = "\n".join(lines)
+            speak_text = f"当前共有 {len(all_formulas)} 个配方，详情已显示在屏幕上。"
+
+            session.reset()
+            return DispatchResult(
+                dialog_text=dialog_text,
+                speak_text=speak_text,
+                state="FEEDBACK",
+                pending_payload="clear",
+                output_type="execute_now",
+            )
+
+        kw = query.lower().strip()
         scored: list[tuple[Formula, float]] = []
         for f in all_formulas:
             if f.formula_id.lower() == kw or f.formula_name.lower() == kw:
@@ -716,8 +738,8 @@ class IntentDispatcher:
         if not scored:
             session.reset()
             return DispatchResult(
-                dialog_text=f"没有找到配方：{keyword}",
-                speak_text=f"没有找到配方：{keyword}",
+                dialog_text=f"没有找到配方：{query}",
+                speak_text=f"没有找到配方：{query}",
                 state="FEEDBACK", pending_payload="clear", output_type="reply",
             )
 
@@ -746,7 +768,7 @@ class IntentDispatcher:
             ],
         }
 
-        if keyword:
+        if query:
             speak_text = (
                 f"找到配方：{best_formula.formula_name}，"
                 f"共 {step_count} 步"
@@ -949,6 +971,51 @@ def _normalize_stock_keyword(text: str | None) -> str | None:
 
     # 如果只剩通用词或空，查全部
     if cleaned in {"", "所有", "全部", "当前", "整体", "药品", "所有药品", "全部药品"}:
+        return None
+
+    return cleaned
+
+
+def _normalize_formula_keyword(text: str | None) -> str | None:
+    """把配方查询语句归一化成配方关键词；返回 None 表示查全部配方。"""
+    if not text:
+        return None
+
+    import re
+
+    raw = text.strip()
+    if not raw:
+        return None
+
+    compact = re.sub(r"[\s，。！？,.!?]", "", raw)
+
+    generic_exact = {
+        "配方",
+        "配方列表",
+        "查看配方",
+        "查询配方",
+        "看配方",
+        "看一下配方",
+        "看下配方",
+        "查看配方列表",
+        "查询配方列表",
+        "所有配方",
+        "全部配方",
+        "当前配方",
+    }
+    if compact in generic_exact:
+        return None
+
+    if re.fullmatch(r"(查看|查询|看|看看|看一下|看下|帮我看|帮我查)?(当前|全部|所有)?配方(列表)?", compact):
+        return None
+
+    cleaned = re.sub(
+        r"(查看|查询|看看|看一下|看下|看|帮我看一下|帮我查一下|帮我看|帮我查|当前|配方|列表|的|一下|请|帮我)",
+        "",
+        compact,
+    ).strip()
+
+    if cleaned in {"", "所有", "全部", "当前"}:
         return None
 
     return cleaned

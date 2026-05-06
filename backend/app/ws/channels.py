@@ -457,8 +457,22 @@ async def _process_text_input(
         return
 
     if route.route == "query_inventory":
-        result = await dispatcher.handle_query_stock(session, user_text)
+        result = await dispatcher.handle_query_stock(session, route.query_keyword or user_text)
         await _apply_dispatch_result(client_id, result)
+        return
+
+    if route.route == "query_formula":
+        result = await dispatcher.handle_query_formula(session, user_text)
+        await _apply_dispatch_result(client_id, result)
+
+        if result.debug and result.debug.get("formula_info"):
+            await ws_manager.send_json(
+                client_id,
+                {
+                    "type": "formula_info",
+                    "data": result.debug["formula_info"],
+                },
+            )
         return
 
     # 状态驱动：awaiting_confirmation 下先解释用户意图
