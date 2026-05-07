@@ -83,6 +83,20 @@ export interface DeviceStatus {
   state_machine_state: string; current_task_id: string | null
 }
 
+export interface ReagentBottle {
+  bottle_id: string; station_id: string | null; reagent_code: string | null
+  reagent_name_cn: string | null; label: string; status: string
+  volume_ml: number | null; fill_date: string | null; notes: string | null
+  is_active: boolean; created_at: string; updated_at: string
+}
+export interface ReagentBottleCreate {
+  bottle_id: string; station_id?: string | null; reagent_code?: string | null
+  label: string; status?: string; volume_ml?: number | null; notes?: string | null
+}
+export type ReagentBottleUpdate = Partial<Omit<ReagentBottleCreate, 'bottle_id'> & {
+  fill_date: string | null
+}>
+
 export const drugApi = {
   list: (p?: { active_only?: boolean; station_id?: string; skip?: number; limit?: number }) =>
     http.get<Drug[]>('/api/drugs', { params: p }).then((r) => r.data),
@@ -125,4 +139,13 @@ export const deviceApi = {
 
 export const systemApi = {
   resources: () => http.get<SystemResources>('/api/system/resources').then((r) => r.data),
+}
+
+export const bottleApi = {
+  list: (p?: { status?: string; station_id?: string; skip?: number; limit?: number }) =>
+    http.get<ReagentBottle[]>('/api/reagent-bottles', { params: p }).then((r) => r.data),
+  get: (id: string) => http.get<ReagentBottle>(`/api/reagent-bottles/${id}`).then((r) => r.data),
+  create: (d: ReagentBottleCreate) => http.post<ReagentBottle>('/api/reagent-bottles', d).then((r) => r.data),
+  update: (id: string, d: ReagentBottleUpdate) => http.put<ReagentBottle>(`/api/reagent-bottles/${id}`, d).then((r) => r.data),
+  delete: (id: string) => http.delete(`/api/reagent-bottles/${id}`),
 }

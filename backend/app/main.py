@@ -14,6 +14,7 @@ from app.api.logs import router as logs_router
 from app.api.manual import router as manual_router
 from app.api.system import router as system_router
 from app.api.dialog_sessions import router as dialog_sessions_router
+from app.api.reagent_bottles import router as reagent_bottles_router
 from app.api.debug import router as debug_router
 from app.ws.channels import router as ws_router
 from app.core.config import settings
@@ -123,6 +124,7 @@ app.include_router(logs_router)
 app.include_router(manual_router)
 app.include_router(system_router)
 app.include_router(dialog_sessions_router)
+app.include_router(reagent_bottles_router)
 app.include_router(debug_router)
 app.include_router(ws_router)
 

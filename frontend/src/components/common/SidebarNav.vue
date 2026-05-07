@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, AudioWaveform, Boxes, Camera, ClipboardList, Gauge, LayoutDashboard, ListChecks, Settings, Scale, ScrollText } from 'lucide-vue-next'
+import { Activity, AudioWaveform, Boxes, Camera, ClipboardList, FlaskConical, Gauge, LayoutDashboard, ListChecks, Settings, Scale, ScrollText } from 'lucide-vue-next'
 import Badge from '@/components/ui/badge/Badge.vue'
 
 const router = useRouter()
@@ -14,6 +14,7 @@ const iconMap = {
   ClipboardList,
   ScrollText,
   Camera,
+  FlaskConical,
   Gauge,
   Settings,
   ListChecks,

@@ -1,12 +1,40 @@
-"""Seed database with default drugs for testing."""
+"""Seed database with default drugs, stations and reagent bottles for testing."""
 import logging
 
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models.drug import Drug, _utcnow
+from app.models.reagent_bottle import ReagentBottle
+from app.models.station import Station
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_STATIONS = [
+    {"station_id": "ST01", "display_name": "工位1", "position_x": 100, "position_y": 200},
+    {"station_id": "ST02", "display_name": "工位2", "position_x": 150, "position_y": 200},
+    {"station_id": "ST03", "display_name": "工位3", "position_x": 200, "position_y": 200},
+    {"station_id": "ST04", "display_name": "工位4", "position_x": 250, "position_y": 200},
+    {"station_id": "ST05", "display_name": "工位5", "position_x": 300, "position_y": 200},
+    {"station_id": "ST06", "display_name": "工位6", "position_x": 100, "position_y": 350},
+    {"station_id": "ST07", "display_name": "工位7", "position_x": 150, "position_y": 350},
+    {"station_id": "ST08", "display_name": "工位8", "position_x": 200, "position_y": 350},
+    {"station_id": "ST09", "display_name": "工位9", "position_x": 250, "position_y": 350},
+    {"station_id": "ST10", "display_name": "工位10", "position_x": 300, "position_y": 350},
+]
+
+_DEFAULT_BOTTLES = [
+    {"bottle_id": "1", "station_id": "ST01", "reagent_code": None, "label": "试剂瓶 1", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "2", "station_id": "ST02", "reagent_code": None, "label": "试剂瓶 2", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "3", "station_id": "ST03", "reagent_code": None, "label": "试剂瓶 3", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "4", "station_id": "ST04", "reagent_code": None, "label": "试剂瓶 4", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "5", "station_id": "ST05", "reagent_code": None, "label": "试剂瓶 5", "status": "empty", "volume_ml": 100.0},
+    {"bottle_id": "6", "station_id": "ST06", "reagent_code": None, "label": "试剂瓶 6", "status": "empty", "volume_ml": 100.0},
+    {"bottle_id": "7", "station_id": "ST07", "reagent_code": None, "label": "试剂瓶 7", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "8", "station_id": "ST08", "reagent_code": None, "label": "试剂瓶 8", "status": "empty", "volume_ml": 250.0},
+    {"bottle_id": "9", "station_id": "ST09", "reagent_code": None, "label": "试剂瓶 9", "status": "empty", "volume_ml": 100.0},
+    {"bottle_id": "10", "station_id": "ST10", "reagent_code": None, "label": "试剂瓶 10", "status": "empty", "volume_ml": 250.0},
+]
 
 _DEFAULT_DRUGS = [
     {
@@ -153,13 +181,44 @@ _DEFAULT_DRUGS = [
 
 
 async def seed_database() -> None:
-    """仅当数据库为空时，插入默认药品数据。"""
+    """仅当数据库为空时，插入默认药品、工位和试剂瓶数据。"""
+    await _seed_stations()
+    await _seed_drugs()
+    await _seed_bottles()
+
+
+async def _seed_stations() -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Station).limit(1))
+            if result.scalar_one_or_none():
+                logger.info("种子检测：工位数据已存在，跳过插入")
+                return
+
+            for data in _DEFAULT_STATIONS:
+                station = Station(
+                    has_bottle=False,
+                    is_occupied=False,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                    **{k: v for k, v in data.items() if k not in ("has_bottle", "is_occupied", "created_at", "updated_at")},
+                )
+                session.add(station)
+
+            await session.commit()
+            logger.info("种子数据已插入（%d 条工位记录）", len(_DEFAULT_STATIONS))
+
+    except Exception as e:
+        logger.warning("工位种子数据插入失败: %s", e)
+
+
+async def _seed_drugs() -> None:
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Drug).limit(1))
             existing = result.scalar_one_or_none()
             if existing:
-                logger.info("种子检测：数据库已有数据，跳过插入")
+                logger.info("种子检测：药品数据已存在，跳过插入")
                 return
 
             for data in _DEFAULT_DRUGS:
@@ -175,4 +234,28 @@ async def seed_database() -> None:
             logger.info("种子数据已插入（%d 条药品记录）", len(_DEFAULT_DRUGS))
 
     except Exception as e:
-        logger.warning("种子数据插入失败: %s", e)
+        logger.warning("药品种子数据插入失败: %s", e)
+
+
+async def _seed_bottles() -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ReagentBottle).limit(1))
+            if result.scalar_one_or_none():
+                logger.info("种子检测：试剂瓶数据已存在，跳过插入")
+                return
+
+            for data in _DEFAULT_BOTTLES:
+                bottle = ReagentBottle(
+                    is_active=True,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                    **{k: v for k, v in data.items() if k not in ("is_active", "created_at", "updated_at")},
+                )
+                session.add(bottle)
+
+            await session.commit()
+            logger.info("种子数据已插入（%d 条试剂瓶记录）", len(_DEFAULT_BOTTLES))
+
+    except Exception as e:
+        logger.warning("试剂瓶种子数据插入失败: %s", e)
