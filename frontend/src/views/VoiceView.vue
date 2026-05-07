@@ -217,7 +217,11 @@ const showSessionList = ref(false)
 const modifyMode = ref(false)
 
 onMounted(async () => {
-  await sessionsStore.loadSessions()
+  try {
+    await sessionsStore.loadSessions()
+  } catch (e) {
+    console.warn('初始化会话列表失败:', e)
+  }
 })
 
 async function onNewSession(): Promise<void> {
