@@ -8,24 +8,25 @@ import pytest
 
 from app.services.draft_manager import draft_manager
 
-models_pkg = types.ModuleType("app.models")
-task_module = types.ModuleType("app.models.task")
-drug_module = types.ModuleType("app.models.drug")
+try:
+    from app.models.drug import Drug  # noqa: F401
+    from app.models.task import Task  # noqa: F401
+except ModuleNotFoundError:
+    models_pkg = types.ModuleType("app.models")
+    task_module = types.ModuleType("app.models.task")
+    drug_module = types.ModuleType("app.models.drug")
 
+    class Task:
+        pass
 
-class Task:
-    pass
+    class Drug:
+        pass
 
-
-class Drug:
-    pass
-
-
-task_module.Task = Task
-drug_module.Drug = Drug
-sys.modules.setdefault("app.models", models_pkg)
-sys.modules.setdefault("app.models.task", task_module)
-sys.modules.setdefault("app.models.drug", drug_module)
+    task_module.Task = Task
+    drug_module.Drug = Drug
+    sys.modules.setdefault("app.models", models_pkg)
+    sys.modules.setdefault("app.models.task", task_module)
+    sys.modules.setdefault("app.models.drug", drug_module)
 
 from app.services.dialog.dispatcher import IntentDispatcher
 from app.services.dialog.session import Session
@@ -174,6 +175,77 @@ async def test_weighing_rule_failure_blocks_command():
     assert "称量任务缺少已匹配试剂信息" in result.error_message
     assert result.pending_payload == "clear"
     assert control.commands == []
+
+
+@pytest.mark.asyncio
+async def test_weighing_confirm_creates_real_task_record_and_sends_command(monkeypatch):
+    from sqlalchemy import delete, select
+
+    from app.core.database import AsyncSessionLocal, Base, engine
+    from app.models.task import Task
+    import app.services.dialog.dispatcher as dispatcher_module
+
+    async def fake_find_best_drug(keyword):
+        drug = SimpleNamespace(
+            reagent_code="NaCl-AR",
+            reagent_name_cn=keyword,
+            station_id="station_1",
+            reagent_name_en=None,
+            reagent_name_formula="NaCl",
+            purity_grade="AR",
+            molar_weight_g_mol=58.44,
+            stock_mg=50000,
+            notes=None,
+        )
+        return drug, 0.95
+
+    def fake_drug_to_dict(drug):
+        return {
+            "reagent_code": drug.reagent_code,
+            "reagent_name_cn": drug.reagent_name_cn,
+            "reagent_name_en": drug.reagent_name_en,
+            "reagent_name_formula": drug.reagent_name_formula,
+            "purity_grade": drug.purity_grade,
+            "station_id": drug.station_id,
+            "molar_weight_g_mol": drug.molar_weight_g_mol,
+            "stock_mg": drug.stock_mg,
+            "notes": drug.notes,
+        }
+
+    monkeypatch.setattr(dispatcher_module, "find_best_drug", fake_find_best_drug)
+    monkeypatch.setattr(dispatcher_module, "drug_to_dict", fake_drug_to_dict)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    fake_ws = FakeWsManager()
+    monkeypatch.setattr(channels, "ws_manager", fake_ws)
+
+    session_id = "ws_draft_real_task_record"
+    draft_manager.clear(session_id)
+    session = Session(session_id=session_id)
+    control = FakeControlClient()
+    dispatcher = IntentDispatcher(
+        llm=FakeLLM(),
+        state_machine=StateMachine(),
+        control_client=control,
+    )
+
+    await channels._process_text_input(dispatcher, session, "client_real_task", "帮我称 5g 氯化钠")
+    await channels._process_text_input(dispatcher, session, "client_real_task", "放 A1，做标准液")
+    await channels._process_text_input(dispatcher, session, "client_real_task", "确认")
+
+    assert len(control.commands) == 1
+    command = control.commands[0]
+    assert _last_message(fake_ws.messages, "command_sent")["command_id"] == command["command_id"]
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Task).where(Task.command_id == command["command_id"]))
+        task = result.scalar_one_or_none()
+        assert task is not None
+        assert task.command_type == "dispense"
+        assert task.status == "EXECUTING"
+        await db.execute(delete(Task).where(Task.task_id == task.task_id))
+        await db.commit()
 
 
 @pytest.mark.asyncio

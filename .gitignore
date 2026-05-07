@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 venv/
 .venv/
 __pycache__/
@@ -30,8 +30,9 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
-# 模型文件（体积过大）
-models/
+# AI 模型资产目录（体积过大，不进 Git；由 download-models.sh 恢复）
+# 注意：只排除根目录 /models/，不影响 backend/app/models/ ORM 包
+/models/
 *.gguf
 *.bin
 *.ggml

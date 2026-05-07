@@ -6,24 +6,25 @@ from types import SimpleNamespace
 
 import pytest
 
-models_pkg = types.ModuleType("app.models")
-task_module = types.ModuleType("app.models.task")
-drug_module = types.ModuleType("app.models.drug")
+try:
+    from app.models.drug import Drug  # noqa: F401
+    from app.models.task import Task  # noqa: F401
+except ModuleNotFoundError:
+    models_pkg = types.ModuleType("app.models")
+    task_module = types.ModuleType("app.models.task")
+    drug_module = types.ModuleType("app.models.drug")
 
+    class Task:
+        pass
 
-class Task:
-    pass
+    class Drug:
+        pass
 
-
-class Drug:
-    pass
-
-
-task_module.Task = Task
-drug_module.Drug = Drug
-sys.modules.setdefault("app.models", models_pkg)
-sys.modules.setdefault("app.models.task", task_module)
-sys.modules.setdefault("app.models.drug", drug_module)
+    task_module.Task = Task
+    drug_module.Drug = Drug
+    sys.modules.setdefault("app.models", models_pkg)
+    sys.modules.setdefault("app.models.task", task_module)
+    sys.modules.setdefault("app.models.drug", drug_module)
 
 from app.services.dialog.dispatcher import DispatchResult, IntentDispatcher
 from app.services.dialog.rules import build_command

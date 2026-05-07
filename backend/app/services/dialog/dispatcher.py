@@ -508,8 +508,28 @@ class IntentDispatcher:
     async def _execute_pending(
         self, session: Session, pending: PendingIntent
     ) -> DispatchResult:
+        try:
+            return await self._execute_pending_inner(session, pending)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[execute_pending] unexpected error")
+            session.clear_pending()
+            return DispatchResult(
+                dialog_text=f"执行链路异常，未下发控制命令：{e}",
+                speak_text=f"执行链路异常，未下发控制命令：{e}",
+                error_code="EXECUTION_INTERNAL_ERROR",
+                error_message=str(e),
+                state="ERROR",
+                pending_payload="clear",
+                output_type="reject",
+            )
+
+    async def _execute_pending_inner(
+        self, session: Session, pending: PendingIntent
+    ) -> DispatchResult:
         intent_data = pending.intent_data
         drug_info = pending.drug_info
+        logger.info("[execute_pending] start intent=%s", intent_data)
+        logger.info("[execute_pending] drug_info=%s", drug_info)
         session.clear_pending()
 
         intent_data["approval_mode"] = "self_approved"
@@ -517,6 +537,7 @@ class IntentDispatcher:
         intent_data["approved_at"] = _now_iso()
 
         can_start, reason = self._sm.can_start_task()
+        logger.info("[execute_pending] can_start=%s reason=%s", can_start, reason)
         if not can_start:
             intent_data["approval_mode"] = "blocked"
             intent_data["rule_check_status"] = "FAILED"
@@ -530,6 +551,7 @@ class IntentDispatcher:
             )
 
         ok, rule_error = self._run_rule_check(intent_data, drug_info)
+        logger.info("[execute_pending] rule_check ok=%s error=%s", ok, rule_error)
         if not ok:
             intent_data["approval_mode"] = "blocked"
             intent_data["rule_check_status"] = "FAILED"
@@ -548,7 +570,9 @@ class IntentDispatcher:
         intent_data["rule_check_status"] = "PASSED"
 
         try:
+            logger.info("[execute_pending] build_command start")
             command = await build_command(intent_data, drug_info)
+            logger.info("[execute_pending] command=%s", command)
         except ValueError as e:
             logger.exception("build_command 失败")
             intent_data["approval_mode"] = "blocked"
@@ -562,7 +586,25 @@ class IntentDispatcher:
                 output_type="reject",
             )
 
-        task_id = await _create_task_record(intent_data, command)
+        try:
+            logger.info("[execute_pending] create_task_record start")
+            task_id = await _create_task_record(intent_data, command)
+            logger.info("[execute_pending] task_id=%s", task_id)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("create_task_record 失败")
+            intent_data["approval_mode"] = "blocked"
+            intent_data["rule_check_status"] = "FAILED"
+            intent_data["error_message"] = str(e)
+            return DispatchResult(
+                dialog_text=f"任务记录创建失败，未下发控制命令：{e}",
+                speak_text=f"任务记录创建失败，未下发控制命令：{e}",
+                error_code="TASK_RECORD_CREATE_FAILED",
+                error_message=str(e),
+                state="ERROR",
+                pending_payload="clear",
+                output_type="reject",
+            )
+
         if not self._sm.start_task(task_id):
             await _update_task_failure(task_id, "状态机拒绝启动任务")
             return DispatchResult(
@@ -573,7 +615,9 @@ class IntentDispatcher:
                 output_type="reject",
             )
 
+        logger.info("[execute_pending] send_command start")
         ok, reason = await self._control.send_command(command)
+        logger.info("[execute_pending] send_command ok=%s reason=%s", ok, reason)
         if not ok:
             self._sm.fail_task(task_id, reason or "命令下发失败")
             await _update_task_failure(task_id, reason or "命令下发失败")
