@@ -48,6 +48,49 @@ def weighing_draft_to_legacy_dispense_intent(draft: TaskDraftRecord) -> dict[str
     }
 
 
+def dispensing_draft_to_legacy_aliquot_intent(draft: TaskDraftRecord) -> dict[str, Any]:
+    """Adapt DISPENSING draft data to the current rule engine's aliquot intent."""
+    if draft.task_type != TaskType.DISPENSING:
+        raise ValueError("Only DISPENSING drafts can be adapted")
+
+    data = draft.current_draft
+    chemical_name = data.get("chemical_display_name") or data.get("source_material_text")
+    chemical_id = data.get("chemical_id")
+    return {
+        "schema_version": "1.0",
+        "intent_id": f"intent_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
+        "intent_type": "aliquot",
+        "task_type": draft.task_type.value,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "is_complete": True,
+        "missing_slots": [],
+        "clarification_question": None,
+        "reagent_hint": {
+            "raw_text": chemical_name,
+            "guessed_code": chemical_id,
+            "guessed_name_cn": chemical_name,
+            "guessed_name_formula": None,
+        },
+        "params": {
+            "portions": int(data["portion_count"]),
+            "mass_per_portion_mg": mass_to_mg(data["amount_per_portion"], data["amount_unit"]),
+            "tolerance_mg": None,
+            "target_vessels": data["target_vessels"],
+        },
+        "raw_asr_text": dispensing_draft_summary(data),
+        "confidence": 1.0,
+        "draft_id": draft.draft_id,
+        "purpose": data.get("purpose"),
+        "chemical_catalog": {
+            "chemical_id": chemical_id,
+            "display_name": chemical_name,
+            "cas_no": data.get("cas_no"),
+            "grade": data.get("grade"),
+            "matched_by": "catalog_lookup",
+        },
+    }
+
+
 def mass_to_mg(value: Any, unit: Any) -> int:
     amount = float(value)
     unit_text = str(unit)
@@ -62,5 +105,15 @@ def draft_summary(data: dict[str, Any]) -> str:
     return (
         f"称量 {data.get('target_mass')}{data.get('mass_unit')} "
         f"{data.get('chemical_display_name') or data.get('chemical_name')} 到 {data.get('target_vessel')}，"
+        f"用途：{data.get('purpose')}"
+    )
+
+
+def dispensing_draft_summary(data: dict[str, Any]) -> str:
+    return (
+        f"分料 {data.get('portion_count')} 份，"
+        f"每份 {data.get('amount_per_portion')}{data.get('amount_unit')} "
+        f"{data.get('chemical_display_name') or data.get('source_material_text')}，"
+        f"目标容器：{', '.join(data.get('target_vessels') or [])}，"
         f"用途：{data.get('purpose')}"
     )

@@ -671,6 +671,24 @@ class IntentDispatcher:
             if not params.get("target_vessel"):
                 return False, "称量任务缺少目标容器"
 
+        if intent_type == "aliquot" and intent_data.get("task_type") == "DISPENSING":
+            portions = params.get("portions")
+            mass_per_portion = params.get("mass_per_portion_mg")
+            target_vessels = params.get("target_vessels")
+            if not drug_info:
+                return False, "分料任务缺少已匹配试剂信息"
+            if not isinstance(portions, int) or portions <= 0:
+                return False, "分料份数必须为正整数"
+            if not isinstance(mass_per_portion, int) or mass_per_portion <= 0:
+                return False, "每份质量必须为正整数 mg"
+            if not isinstance(target_vessels, list) or not target_vessels:
+                return False, "分料任务缺少目标容器"
+            if len(target_vessels) != portions:
+                return False, "目标容器数量和分料份数不一致"
+            stock_mg = drug_info.get("stock_mg")
+            if isinstance(stock_mg, int) and stock_mg < portions * mass_per_portion:
+                return False, f"库存不足：需要 {portions * mass_per_portion} mg，当前 {stock_mg} mg"
+
         return True, None
 
     # ─── 查询类直接执行 ──────────────────────────────────────────

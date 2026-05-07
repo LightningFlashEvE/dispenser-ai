@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.schemas.task_draft_schema import DraftEvent, DraftStatus, TaskDraftRecord, TaskType
+from app.schemas.dispensing_draft_schema import DISPENSING_DRAFT_DEFAULT
 from app.schemas.weighing_draft_schema import WEIGHING_DRAFT_DEFAULT
 from app.services.chemical_catalog import (
     HIGH_CONFIDENCE_THRESHOLD,
@@ -13,7 +14,10 @@ from app.services.chemical_catalog import (
     select_candidate_by_index,
 )
 from app.services.draft_store import SQLiteDraftStore
-from app.services.proposal_adapter import weighing_draft_to_legacy_dispense_intent
+from app.services.proposal_adapter import (
+    dispensing_draft_to_legacy_aliquot_intent,
+    weighing_draft_to_legacy_dispense_intent,
+)
 from app.validators.dispensing_validator import validate_dispensing_draft
 from app.validators.mixing_validator import validate_mixing_draft
 from app.validators.weighing_validator import validate_weighing_draft
@@ -31,7 +35,10 @@ class DraftManager:
         DraftStatus.NEEDS_FIELD_CONFIRMATION,
         DraftStatus.READY_FOR_REVIEW,
     )
-    ASR_CRITICAL_FIELDS = {"chemical_name_text", "target_mass", "mass_unit", "target_vessel"}
+    ASR_CRITICAL_FIELDS_BY_TYPE = {
+        TaskType.WEIGHING: {"chemical_name_text", "target_mass", "mass_unit", "target_vessel"},
+        TaskType.DISPENSING: {"source_material_text", "amount_per_portion", "amount_unit", "target_vessels"},
+    }
     CATALOG_PENDING_FIELDS = ("catalog_candidate", "chemical_id")
     ASR_CONFIDENCE_THRESHOLD = 0.85
 
@@ -53,14 +60,19 @@ class DraftManager:
         return self._drafts_by_id.get(draft_id)
 
     def start(self, session_id: str, task_type: TaskType) -> TaskDraftRecord:
-        if task_type != TaskType.WEIGHING:
-            raise ValueError("Only WEIGHING drafts are supported in phase 1")
+        if task_type not in (TaskType.WEIGHING, TaskType.DISPENSING):
+            raise ValueError("Only WEIGHING and DISPENSING drafts are supported")
 
+        default = (
+            WEIGHING_DRAFT_DEFAULT
+            if task_type == TaskType.WEIGHING
+            else DISPENSING_DRAFT_DEFAULT
+        )
         draft = TaskDraftRecord(
             draft_id=f"draft_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
             task_type=task_type,
-            current_draft=dict(WEIGHING_DRAFT_DEFAULT),
+            current_draft=dict(default),
         )
         draft = self._validate_and_stamp(draft)
         self._register(draft)
@@ -93,7 +105,7 @@ class DraftManager:
                 continue
             if value is None or value == "":
                 continue
-            if key == "chemical_name":
+            if key == "chemical_name" and task_type == TaskType.WEIGHING:
                 key = "chemical_name_text"
             if key in draft.current_draft:
                 draft.current_draft[key] = value
@@ -101,7 +113,7 @@ class DraftManager:
                     draft.current_draft["chemical_name"] = value
                 applied_patch[key] = value
 
-        if "chemical_name_text" in applied_patch:
+        if "chemical_name_text" in applied_patch or "source_material_text" in applied_patch:
             self._lookup_catalog(draft, user_message=user_message)
 
         draft = self._validate_and_stamp(draft)
@@ -191,7 +203,10 @@ class DraftManager:
         draft = self.get_active(session_id)
         if draft is None or draft.status != DraftStatus.NEEDS_FIELD_CONFIRMATION:
             return draft
-        draft.pending_confirmation_fields = []
+        asr_fields = self.ASR_CRITICAL_FIELDS_BY_TYPE.get(draft.task_type, set())
+        draft.pending_confirmation_fields = [
+            field for field in draft.pending_confirmation_fields if field not in asr_fields
+        ]
         if draft.asr is not None:
             draft.asr = {**draft.asr, "needs_confirmation": False}
         draft = self._validate_and_stamp(draft)
@@ -268,14 +283,17 @@ class DraftManager:
         *,
         user_message: str | None = None,
     ) -> dict[str, Any]:
-        if draft.task_type != TaskType.WEIGHING:
-            raise ValueError("Only WEIGHING drafts can be converted in phase 1")
         if draft.proposal_intent is not None:
             return draft.proposal_intent
         if not draft.ready_for_review:
             raise ValueError("Draft is not ready for review")
 
-        intent = weighing_draft_to_legacy_dispense_intent(draft)
+        if draft.task_type == TaskType.WEIGHING:
+            intent = weighing_draft_to_legacy_dispense_intent(draft)
+        elif draft.task_type == TaskType.DISPENSING:
+            intent = dispensing_draft_to_legacy_aliquot_intent(draft)
+        else:
+            raise ValueError("Unsupported task draft type")
         now = datetime.now(timezone.utc)
         draft.proposal_intent = intent
         draft.status = DraftStatus.PROPOSAL_CREATED
@@ -323,7 +341,11 @@ class DraftManager:
         *,
         user_message: str | None = None,
     ) -> None:
-        name_text = draft.current_draft.get("chemical_name_text")
+        name_text = (
+            draft.current_draft.get("chemical_name_text")
+            if draft.task_type == TaskType.WEIGHING
+            else draft.current_draft.get("source_material_text")
+        )
         self.record_event(
             draft,
             "catalog_lookup_started",
@@ -475,7 +497,9 @@ class DraftManager:
     ) -> None:
         if not asr:
             return
-        critical_fields = sorted(self.ASR_CRITICAL_FIELDS.intersection(applied_patch))
+        critical_fields = sorted(
+            self.ASR_CRITICAL_FIELDS_BY_TYPE.get(draft.task_type, set()).intersection(applied_patch)
+        )
         confidence = asr.get("confidence")
         low_confidence = (
             isinstance(confidence, (int, float))
@@ -490,7 +514,11 @@ class DraftManager:
         }
         if not needs_confirmation or not critical_fields:
             return
-        draft.pending_confirmation_fields = critical_fields
+        existing = list(draft.pending_confirmation_fields)
+        for field in critical_fields:
+            if field not in existing:
+                existing.append(field)
+        draft.pending_confirmation_fields = existing
         draft.ready_for_review = False
         draft.status = DraftStatus.NEEDS_FIELD_CONFIRMATION
 

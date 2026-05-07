@@ -303,9 +303,22 @@ const draftRows = computed(() => {
   const data = draft?.current_draft ?? {}
   const missing = new Set(draft?.missing_slots ?? [])
   const pending = new Set(draft?.pending_confirmation_fields ?? [])
-  return [
+  const baseRows = [
     { label: '用户输入', value: String(data.chemical_name_text ?? data.chemical_name ?? '待补充'), missing: missing.has('chemical_id'), needsConfirmation: pending.has('chemical_id') },
     { label: '系统匹配', value: formatCatalogMatch(data), missing: missing.has('chemical_id'), needsConfirmation: pending.has('catalog_candidate') || pending.has('chemical_id') },
+  ]
+  if (draft?.task_type === 'DISPENSING') {
+    return [
+      { label: '用户输入', value: String(data.source_material_text ?? '待补充'), missing: missing.has('chemical_id'), needsConfirmation: pending.has('chemical_id') },
+      ...baseRows.slice(1),
+      { label: '份数', value: String(data.portion_count ?? '待补充'), missing: missing.has('portion_count'), needsConfirmation: pending.has('portion_count') },
+      { label: '每份', value: formatDraftMass(data.amount_per_portion, data.amount_unit), missing: missing.has('amount_per_portion') || missing.has('amount_unit'), needsConfirmation: pending.has('amount_per_portion') || pending.has('amount_unit') },
+      { label: '目标容器', value: formatVessels(data.target_vessels), missing: missing.has('target_vessels'), needsConfirmation: pending.has('target_vessels') },
+      { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
+    ]
+  }
+  return [
+    ...baseRows,
     { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit'), needsConfirmation: pending.has('target_mass') || pending.has('mass_unit') },
     { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel'), needsConfirmation: pending.has('target_vessel') },
     { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
@@ -386,6 +399,10 @@ function formatParamVal(k: string, v: unknown) { return k.endsWith('_mg') && typ
 function formatDraftMass(value: unknown, unit: unknown) {
   if (value === null || value === undefined || value === '') return '待补充'
   return `${value} ${unit ?? ''}`.trim()
+}
+function formatVessels(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return '待补充'
+  return value.join(', ')
 }
 function formatCatalogMatch(data: Record<string, unknown>) {
   if (data.catalog_match_status === 'NO_MATCH') return '未找到化学品'

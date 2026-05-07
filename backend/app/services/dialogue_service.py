@@ -9,8 +9,13 @@ SLOT_LABELS = {
     "chemical_name": "药品名称",
     "chemical_id": "化学品 catalog 确认",
     "catalog_candidate": "具体化学品候选",
+    "source_material_text": "来源物料",
     "target_mass": "称量质量",
     "mass_unit": "单位",
+    "portion_count": "分料份数",
+    "amount_per_portion": "每份数量",
+    "amount_unit": "单位",
+    "target_vessels": "目标容器",
     "target_vessel": "目标容器",
     "purpose": "本次任务用途",
 }
@@ -37,7 +42,14 @@ def build_draft_reply(draft: TaskDraftRecord) -> str:
 
         asr = draft.asr or {}
         parts: list[str] = []
-        if data.get("target_mass") and data.get("mass_unit"):
+        if draft.task_type.value == "DISPENSING":
+            if data.get("portion_count"):
+                parts.append(f"分成 {data.get('portion_count')} 份")
+            if data.get("amount_per_portion") and data.get("amount_unit"):
+                parts.append(f"每份 {data.get('amount_per_portion')}{data.get('amount_unit')}")
+            if data.get("source_material_text"):
+                parts.append(str(data.get("source_material_text")))
+        elif data.get("target_mass") and data.get("mass_unit"):
             parts.append(f"称量 {_format_amount(data.get('target_mass'))}{data.get('mass_unit')}")
         if data.get("chemical_name"):
             parts.append(str(data.get("chemical_name")))
@@ -58,6 +70,15 @@ def build_draft_reply(draft: TaskDraftRecord) -> str:
                 f"系统匹配：{data.get('chemical_display_name')} / "
                 f"{data.get('grade') or '未标注等级'} / "
                 f"CAS {data.get('cas_no') or '未知'}。"
+            )
+        if draft.task_type.value == "DISPENSING":
+            return (
+                "我理解为："
+                f"将 {data.get('chemical_display_name') or data.get('source_material_text')} "
+                f"分成 {data.get('portion_count')} 份，"
+                f"每份 {_format_amount(data.get('amount_per_portion'))}{data.get('amount_unit')}，"
+                f"放入 {', '.join(data.get('target_vessels') or [])}，"
+                f"用于{data.get('purpose')}。{catalog}请确认是否正确。"
             )
         return (
             "我理解为："
@@ -80,6 +101,13 @@ def build_cancel_reply(had_draft: bool) -> str:
 def build_proposal_reply(intent_data: dict[str, Any]) -> str:
     params = intent_data.get("params") or {}
     reagent = (intent_data.get("reagent_hint") or {}).get("raw_text")
+    if intent_data.get("task_type") == "DISPENSING":
+        return (
+            "已生成正式任务 proposal，等待规则引擎校验："
+            f"分料 {params.get('portions')} 份 {reagent}，"
+            f"每份 {params.get('mass_per_portion_mg')}mg，"
+            f"目标容器 {', '.join(params.get('target_vessels') or [])}。"
+        )
     return (
         "已生成正式任务 proposal，等待规则引擎校验："
         f"称量 {params.get('target_mass_mg')}mg {reagent}，"

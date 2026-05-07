@@ -34,7 +34,7 @@ class RouteResult:
 CONFIRM_WORDS = ("确认", "是的", "对", "没错", "执行", "开始")
 CANCEL_WORDS = ("取消", "不要了", "重来", "清空", "算了")
 WEIGHING_WORDS = ("称", "称量", "称取", "称重")
-DISPENSING_WORDS = ("分装", "分料", "分成", "每管", "每份")
+DISPENSING_WORDS = ("分装", "分料", "分成", "每管", "每份", "每瓶", "aliquot")
 MIXING_WORDS = ("混合", "配制", "配 ", "溶液", "%")
 FORMULA_SELECT_WORDS = ("应用", "使用", "执行", "套用", "选择", "选用", "采用")
 
@@ -93,10 +93,12 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
         return RouteResult(route="start_task", task_type=TaskType.WEIGHING)
 
     if has_dispensing and not has_weighing and not has_mixing:
+        return RouteResult(route="start_task", task_type=TaskType.DISPENSING)
+
+    if "配" in text and re.search(r"\d+\s*(管|瓶|份|个)", text):
         return RouteResult(
             route="clarify",
-            task_type=TaskType.DISPENSING,
-            clarification="分料任务将在第二阶段开放；当前请先使用称量任务。",
+            clarification="你是要配制新的溶液，还是把已有物料分装成多份？",
         )
 
     if has_mixing and not has_weighing and not has_dispensing:

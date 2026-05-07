@@ -17,6 +17,14 @@ ALLOWED_PATCH_FIELDS: dict[TaskType, set[str]] = {
         "target_vessel",
         "purpose",
     },
+    TaskType.DISPENSING: {
+        "source_material_text",
+        "portion_count",
+        "amount_per_portion",
+        "amount_unit",
+        "target_vessels",
+        "purpose",
+    },
 }
 
 AI_EXTRACTOR_PROMPT = """\
@@ -95,6 +103,8 @@ def _sanitize_patch(task_type: TaskType, patch: dict[str, Any]) -> dict[str, Any
 
 
 def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:
+    if task_type == TaskType.DISPENSING:
+        return _extract_dispensing_with_rules(text)
     if task_type != TaskType.WEIGHING:
         return {}
 
@@ -131,6 +141,71 @@ def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:
         patch["chemical_name"] = chemical
 
     return patch
+
+
+def _extract_dispensing_with_rules(text: str) -> dict[str, Any]:
+    patch: dict[str, Any] = {}
+
+    count_match = re.search(r"(?:分成|分)\s*(?P<count>\d+)\s*(?:份|管|瓶|个)", text)
+    if not count_match:
+        count_match = re.search(r"(?P<count>\d+)\s*(?:份|管|瓶|个)", text)
+    if count_match:
+        patch["portion_count"] = int(count_match.group("count"))
+
+    amount_match = re.search(
+        r"(?:每份|每管|每瓶|每个)\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>mg|g|kg|毫克|克|千克)",
+        text,
+        re.I,
+    )
+    if amount_match:
+        patch["amount_per_portion"] = float(amount_match.group("value"))
+        patch["amount_unit"] = _normalize_unit(amount_match.group("unit"))
+
+    vessels = _extract_target_vessels(text)
+    if vessels:
+        patch["target_vessels"] = vessels
+
+    purpose_match = re.search(r"(?:用于|用来|做|制备|用途是)\s*(?P<purpose>[^，。,.]+)", text)
+    if purpose_match:
+        patch["purpose"] = purpose_match.group("purpose").strip()
+
+    material = _extract_source_material(text)
+    if material:
+        patch["source_material_text"] = material
+
+    return patch
+
+
+def _extract_target_vessels(text: str) -> list[str]:
+    range_match = re.search(
+        r"(?P<prefix>[A-Za-z])(?P<start>\d+)\s*[-到至]\s*(?P=prefix)?(?P<end>\d+)",
+        text,
+    )
+    if range_match:
+        prefix = range_match.group("prefix").upper()
+        start = int(range_match.group("start"))
+        end = int(range_match.group("end"))
+        if end >= start and end - start < 100:
+            return [f"{prefix}{index}" for index in range(start, end + 1)]
+
+    vessels = re.findall(r"\b[A-Za-z]\d+\b", text)
+    return [vessel.upper() for vessel in vessels]
+
+
+def _extract_source_material(text: str) -> str | None:
+    known = ("氯化钠", "乙醇", "无水乙醇", "葡萄糖", "碳酸氢钠", "氯化钾")
+    for name in known:
+        if name in text:
+            return name
+    match = re.search(
+        r"(?:把|将|给我分|分装|分料)\s*(?P<name>[\u4e00-\u9fa5A-Za-z0-9]+?)(?:分成|分|，|,|每|$)",
+        text,
+    )
+    if match:
+        name = _clean_chemical_name(match.group("name"))
+        if name:
+            return name
+    return None
 
 
 def _normalize_unit(unit: str) -> str:
