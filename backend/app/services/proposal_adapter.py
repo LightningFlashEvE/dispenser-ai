@@ -12,6 +12,8 @@ def weighing_draft_to_legacy_dispense_intent(draft: TaskDraftRecord) -> dict[str
         raise ValueError("Only WEIGHING drafts can be adapted in phase 1")
 
     data = draft.current_draft
+    chemical_name = data.get("chemical_display_name") or data.get("chemical_name")
+    chemical_id = data.get("chemical_id")
     return {
         "schema_version": "1.0",
         "intent_id": f"intent_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
@@ -22,9 +24,9 @@ def weighing_draft_to_legacy_dispense_intent(draft: TaskDraftRecord) -> dict[str
         "missing_slots": [],
         "clarification_question": None,
         "reagent_hint": {
-            "raw_text": data["chemical_name"],
-            "guessed_code": None,
-            "guessed_name_cn": data["chemical_name"],
+            "raw_text": chemical_name,
+            "guessed_code": chemical_id,
+            "guessed_name_cn": chemical_name,
             "guessed_name_formula": None,
         },
         "params": {
@@ -36,6 +38,13 @@ def weighing_draft_to_legacy_dispense_intent(draft: TaskDraftRecord) -> dict[str
         "confidence": 1.0,
         "draft_id": draft.draft_id,
         "purpose": data.get("purpose"),
+        "chemical_catalog": {
+            "chemical_id": chemical_id,
+            "display_name": chemical_name,
+            "cas_no": data.get("cas_no"),
+            "grade": data.get("grade"),
+            "matched_by": "catalog_lookup",
+        },
     }
 
 
@@ -52,7 +61,6 @@ def mass_to_mg(value: Any, unit: Any) -> int:
 def draft_summary(data: dict[str, Any]) -> str:
     return (
         f"称量 {data.get('target_mass')}{data.get('mass_unit')} "
-        f"{data.get('chemical_name')} 到 {data.get('target_vessel')}，"
+        f"{data.get('chemical_display_name') or data.get('chemical_name')} 到 {data.get('target_vessel')}，"
         f"用途：{data.get('purpose')}"
     )
-

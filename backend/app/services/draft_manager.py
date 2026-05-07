@@ -6,6 +6,12 @@ from typing import Any
 
 from app.schemas.task_draft_schema import DraftEvent, DraftStatus, TaskDraftRecord, TaskType
 from app.schemas.weighing_draft_schema import WEIGHING_DRAFT_DEFAULT
+from app.services.chemical_catalog import (
+    HIGH_CONFIDENCE_THRESHOLD,
+    lookup_chemical_candidates,
+    select_candidate_by_id,
+    select_candidate_by_index,
+)
 from app.services.draft_store import SQLiteDraftStore
 from app.services.proposal_adapter import weighing_draft_to_legacy_dispense_intent
 from app.validators.dispensing_validator import validate_dispensing_draft
@@ -25,7 +31,8 @@ class DraftManager:
         DraftStatus.NEEDS_FIELD_CONFIRMATION,
         DraftStatus.READY_FOR_REVIEW,
     )
-    ASR_CRITICAL_FIELDS = {"chemical_name", "target_mass", "mass_unit", "target_vessel"}
+    ASR_CRITICAL_FIELDS = {"chemical_name_text", "target_mass", "mass_unit", "target_vessel"}
+    CATALOG_PENDING_FIELDS = ("catalog_candidate", "chemical_id")
     ASR_CONFIDENCE_THRESHOLD = 0.85
 
     def __init__(self, store: SQLiteDraftStore | None = None) -> None:
@@ -82,11 +89,20 @@ class DraftManager:
         for key, value in patch.items():
             if key == "task_type":
                 continue
+            if key in {"chemical_id", "chemical_display_name", "cas_no", "grade", "catalog_match_status", "catalog_candidates"}:
+                continue
             if value is None or value == "":
                 continue
+            if key == "chemical_name":
+                key = "chemical_name_text"
             if key in draft.current_draft:
                 draft.current_draft[key] = value
+                if key == "chemical_name_text":
+                    draft.current_draft["chemical_name"] = value
                 applied_patch[key] = value
+
+        if "chemical_name_text" in applied_patch:
+            self._lookup_catalog(draft, user_message=user_message)
 
         draft = self._validate_and_stamp(draft)
         self._apply_asr_guard(draft, applied_patch, asr)
@@ -109,6 +125,60 @@ class DraftManager:
             sanitized_patch=sanitized_patch if sanitized_patch is not None else patch,
             applied_patch=applied_patch,
             asr=asr,
+        )
+        return draft
+
+    def confirm_catalog_candidate(
+        self,
+        session_id: str,
+        *,
+        index: int | None = None,
+        chemical_id: str | None = None,
+        user_message: str | None = None,
+        selected_by: str = "user",
+    ) -> TaskDraftRecord | None:
+        draft = self.get_active(session_id)
+        if draft is None:
+            return None
+        candidates = draft.current_draft.get("catalog_candidates") or []
+        selected = None
+        if chemical_id:
+            selected = select_candidate_by_id(candidates, chemical_id)
+        elif index is not None:
+            selected = select_candidate_by_index(candidates, index)
+        if selected is None:
+            self.record_event(
+                draft,
+                "catalog_candidate_selection_failed",
+                user_message=user_message,
+                applied_patch={
+                    "chemical_id": chemical_id,
+                    "index": index,
+                    "candidate_count": len(candidates),
+                },
+            )
+            return draft
+
+        self._apply_catalog_candidate(draft, selected, status="CONFIRMED")
+        draft.pending_confirmation_fields = [
+            field
+            for field in draft.pending_confirmation_fields
+            if field not in self.CATALOG_PENDING_FIELDS
+        ]
+        draft = self._validate_and_stamp(draft)
+        self.record_event(
+            draft,
+            "catalog_candidate_confirmed",
+            user_message=user_message,
+            applied_patch={
+                "selected_chemical_id": selected.get("chemical_id"),
+                "selected_by": selected_by,
+            },
+        )
+        self.record_event(
+            draft,
+            "ready_for_review" if draft.ready_for_review else "validation_failed",
+            user_message=user_message,
         )
         return draft
 
@@ -247,6 +317,105 @@ class DraftManager:
         )
         self._save(draft)
 
+    def _lookup_catalog(
+        self,
+        draft: TaskDraftRecord,
+        *,
+        user_message: str | None = None,
+    ) -> None:
+        name_text = draft.current_draft.get("chemical_name_text")
+        self.record_event(
+            draft,
+            "catalog_lookup_started",
+            user_message=user_message,
+            applied_patch={"chemical_name_text": name_text},
+        )
+        candidates = [
+            candidate.to_dict()
+            for candidate in lookup_chemical_candidates(name_text)
+        ]
+        draft.current_draft["catalog_candidates"] = candidates
+        if not candidates:
+            draft.current_draft["chemical_id"] = None
+            draft.current_draft["chemical_display_name"] = None
+            draft.current_draft["cas_no"] = None
+            draft.current_draft["grade"] = None
+            draft.current_draft["catalog_match_status"] = "NO_MATCH"
+            self._ensure_pending_catalog_confirmation(draft)
+            self.record_event(
+                draft,
+                "catalog_lookup_no_match",
+                user_message=user_message,
+                applied_patch={
+                    "chemical_name_text": name_text,
+                    "candidate_count": 0,
+                    "candidates": [],
+                },
+            )
+            return
+
+        if len(candidates) == 1 and candidates[0].get("confidence", 0) >= HIGH_CONFIDENCE_THRESHOLD:
+            self._apply_catalog_candidate(draft, candidates[0], status="CONFIRMED")
+            self._clear_pending_catalog_confirmation(draft)
+            self.record_event(
+                draft,
+                "catalog_lookup_single_candidate",
+                user_message=user_message,
+                applied_patch={
+                    "chemical_name_text": name_text,
+                    "candidate_count": 1,
+                    "candidates": candidates,
+                    "selected_chemical_id": candidates[0].get("chemical_id"),
+                    "selected_by": "catalog_lookup",
+                },
+            )
+            return
+
+        draft.current_draft["chemical_id"] = None
+        draft.current_draft["chemical_display_name"] = None
+        draft.current_draft["cas_no"] = None
+        draft.current_draft["grade"] = None
+        draft.current_draft["catalog_match_status"] = "MULTIPLE_CANDIDATES"
+        self._ensure_pending_catalog_confirmation(draft)
+        self.record_event(
+            draft,
+            "catalog_lookup_multiple_candidates",
+            user_message=user_message,
+            applied_patch={
+                "chemical_name_text": name_text,
+                "candidate_count": len(candidates),
+                "candidates": candidates,
+            },
+        )
+
+    def _apply_catalog_candidate(
+        self,
+        draft: TaskDraftRecord,
+        candidate: dict,
+        *,
+        status: str,
+    ) -> None:
+        draft.current_draft["chemical_id"] = candidate.get("chemical_id")
+        draft.current_draft["chemical_display_name"] = candidate.get("display_name")
+        draft.current_draft["chemical_name"] = candidate.get("display_name")
+        draft.current_draft["cas_no"] = candidate.get("cas_no")
+        draft.current_draft["grade"] = candidate.get("grade")
+        draft.current_draft["catalog_match_status"] = status
+
+    def _ensure_pending_catalog_confirmation(self, draft: TaskDraftRecord) -> None:
+        existing = list(draft.pending_confirmation_fields)
+        for field in self.CATALOG_PENDING_FIELDS:
+            if field not in existing:
+                existing.append(field)
+        draft.pending_confirmation_fields = existing
+
+    def _clear_pending_catalog_confirmation(self, draft: TaskDraftRecord) -> None:
+        draft.pending_confirmation_fields = [
+            field
+            for field in draft.pending_confirmation_fields
+            if field not in self.CATALOG_PENDING_FIELDS
+        ]
+
     def expire_stale(
         self,
         *,
@@ -286,11 +455,15 @@ class DraftManager:
         draft.complete = result.complete
         draft.missing_slots = result.missing_slots
         draft.ready_for_review = result.ready_for_review
-        draft.status = (
-            DraftStatus.READY_FOR_REVIEW
-            if result.ready_for_review
-            else DraftStatus.COLLECTING
-        )
+        if draft.pending_confirmation_fields:
+            draft.ready_for_review = False
+            draft.status = DraftStatus.NEEDS_FIELD_CONFIRMATION
+        else:
+            draft.status = (
+                DraftStatus.READY_FOR_REVIEW
+                if result.ready_for_review
+                else DraftStatus.COLLECTING
+            )
         draft.updated_at = datetime.now(timezone.utc)
         return draft
 

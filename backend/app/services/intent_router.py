@@ -12,6 +12,7 @@ Route = Literal[
     "query_inventory",
     "query_formula",
     "select_formula",
+    "select_catalog_candidate",
     "query_device_status",
     "start_task",
     "update_task",
@@ -55,6 +56,9 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
     if _is_formula_selection(text):
         return RouteResult(route="select_formula")
 
+    if active_draft and _needs_catalog_candidate(active_draft) and _is_catalog_selection(text):
+        return RouteResult(route="select_catalog_candidate", task_type=active_draft.task_type)
+
     if _contains_any(text, CONFIRM_WORDS):
         if active_draft and active_draft.status.value == "NEEDS_FIELD_CONFIRMATION":
             return RouteResult(route="confirm_fields", task_type=active_draft.task_type)
@@ -74,7 +78,11 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
     if re.search(r"(设备状态|天平状态|状态)", text):
         return RouteResult(route="query_device_status")
 
-    if active_draft and active_draft.status.value in ("COLLECTING", "READY_FOR_REVIEW"):
+    if active_draft and active_draft.status.value in (
+        "COLLECTING",
+        "NEEDS_FIELD_CONFIRMATION",
+        "READY_FOR_REVIEW",
+    ):
         return RouteResult(route="update_task", task_type=active_draft.task_type)
 
     has_weighing = _contains_any(text, WEIGHING_WORDS)
@@ -120,6 +128,19 @@ def _is_formula_query(text: str) -> bool:
 
 def _is_formula_selection(text: str) -> bool:
     return "配方" in text and _contains_any(text, FORMULA_SELECT_WORDS)
+
+
+def _needs_catalog_candidate(active_draft: TaskDraftRecord) -> bool:
+    return any(
+        field in active_draft.pending_confirmation_fields
+        for field in ("catalog_candidate", "chemical_id")
+    )
+
+
+def _is_catalog_selection(text: str) -> bool:
+    return bool(
+        re.search(r"(选择|选|用|确认|第\s*[一二三四五六七八九十\d]+|CHEM_[A-Za-z0-9_]+)", text, re.I)
+    )
 
 
 def _extract_drug_keyword(text: str) -> str:

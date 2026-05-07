@@ -4,7 +4,7 @@ from app.schemas.task_draft_schema import DraftValidationResult
 
 
 REQUIRED_WEIGHING_SLOTS = [
-    "chemical_name",
+    "chemical_id",
     "target_mass",
     "mass_unit",
     "target_vessel",
@@ -22,6 +22,17 @@ def validate_weighing_draft(draft: dict) -> DraftValidationResult:
     ]
     errors: list[str] = []
 
+    catalog_status = draft.get("catalog_match_status")
+    if catalog_status != "CONFIRMED":
+        if "chemical_id" not in missing:
+            missing.insert(0, "chemical_id")
+        if catalog_status == "NO_MATCH":
+            errors.append("chemical catalog lookup returned no candidates")
+        elif catalog_status == "MULTIPLE_CANDIDATES":
+            errors.append("chemical catalog candidate must be selected")
+        elif catalog_status not in ("UNMATCHED", "SINGLE_MATCH", None):
+            errors.append(f"unsupported catalog_match_status: {catalog_status}")
+
     target_mass = draft.get("target_mass")
     if target_mass is not None:
         try:
@@ -34,6 +45,10 @@ def validate_weighing_draft(draft: dict) -> DraftValidationResult:
     if mass_unit is not None and mass_unit not in VALID_MASS_UNITS:
         errors.append(f"unsupported mass_unit: {mass_unit}")
 
+    pending_fields = draft.get("pending_confirmation_fields") or []
+    if pending_fields:
+        errors.append("pending field confirmation is required")
+
     complete = not missing and not errors
     return DraftValidationResult(
         complete=complete,
@@ -41,4 +56,3 @@ def validate_weighing_draft(draft: dict) -> DraftValidationResult:
         ready_for_review=complete,
         errors=errors,
     )
-

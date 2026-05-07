@@ -7,6 +7,8 @@ from app.schemas.task_draft_schema import DraftStatus, TaskDraftRecord
 
 SLOT_LABELS = {
     "chemical_name": "药品名称",
+    "chemical_id": "化学品 catalog 确认",
+    "catalog_candidate": "具体化学品候选",
     "target_mass": "称量质量",
     "mass_unit": "单位",
     "target_vessel": "目标容器",
@@ -17,6 +19,22 @@ SLOT_LABELS = {
 def build_draft_reply(draft: TaskDraftRecord) -> str:
     if draft.status == DraftStatus.NEEDS_FIELD_CONFIRMATION:
         data = draft.current_draft
+        if "catalog_candidate" in draft.pending_confirmation_fields:
+            candidates = data.get("catalog_candidates") or []
+            if data.get("catalog_match_status") == "NO_MATCH":
+                return f"未找到化学品：{data.get('chemical_name_text') or '未知'}。请重新说明化学品名称。"
+            lines = [
+                f"检测到多个化学品候选，请选择具体化学品：",
+            ]
+            for index, candidate in enumerate(candidates, start=1):
+                lines.append(
+                    f"{index}. {candidate.get('display_name')} "
+                    f"{candidate.get('grade') or ''} "
+                    f"CAS {candidate.get('cas_no') or '未知'} "
+                    f"({candidate.get('chemical_id')})"
+                )
+            return "\n".join(lines)
+
         asr = draft.asr or {}
         parts: list[str] = []
         if data.get("target_mass") and data.get("mass_unit"):
@@ -34,11 +52,19 @@ def build_draft_reply(draft: TaskDraftRecord) -> str:
 
     if draft.ready_for_review:
         data = draft.current_draft
+        catalog = ""
+        if data.get("chemical_id"):
+            catalog = (
+                f"系统匹配：{data.get('chemical_display_name')} / "
+                f"{data.get('grade') or '未标注等级'} / "
+                f"CAS {data.get('cas_no') or '未知'}。"
+            )
         return (
             "我理解为："
             f"称量 {_format_amount(data.get('target_mass'))}{data.get('mass_unit')} "
-            f"{data.get('chemical_name')}，放入 {data.get('target_vessel')}，"
-            f"用于{data.get('purpose')}。请确认是否正确。"
+            f"{data.get('chemical_display_name') or data.get('chemical_name')}，"
+            f"放入 {data.get('target_vessel')}，"
+            f"用于{data.get('purpose')}。{catalog}请确认是否正确。"
         )
 
     labels = [SLOT_LABELS.get(slot, slot) for slot in draft.missing_slots]

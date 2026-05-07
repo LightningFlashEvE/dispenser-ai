@@ -405,6 +405,29 @@ async def _process_text_input(
         await ws_manager.send_json(client_id, {"type": "state.update", "state": "ASKING"})
         return
 
+    if route.route == "select_catalog_candidate":
+        session.add_user_dialog(user_text)
+        index, chemical_id = _parse_catalog_selection(user_text)
+        draft = draft_manager.confirm_catalog_candidate(
+            session.session_id,
+            index=index,
+            chemical_id=chemical_id,
+            user_message=user_text,
+        )
+        reply = build_draft_reply(draft) if draft is not None else "当前没有可选择的化学品候选。"
+        session.add_assistant_dialog(reply)
+        if draft is not None:
+            await _send_draft_update(client_id, draft)
+        await ws_manager.send_json(client_id, {"type": "chat.done", "text": reply})
+        await ws_manager.send_json(
+            client_id,
+            {
+                "type": "state.update",
+                "state": "awaiting_confirmation" if draft and draft.ready_for_review else "ASKING",
+            },
+        )
+        return
+
     if route.route == "confirm_fields":
         session.add_user_dialog(user_text)
         draft = draft_manager.confirm_asr_fields(
@@ -632,6 +655,53 @@ async def _force_persist_session(session_id: str, session: Session) -> None:
             await db.commit()
     except Exception:
         logger.exception("[_force_persist_session] 持久化失败 session_id=%s", session_id)
+
+
+def _parse_catalog_selection(user_text: str) -> tuple[int | None, str | None]:
+    import re
+
+    chemical_id_match = re.search(r"(CHEM_[A-Za-z0-9_]+)", user_text, re.I)
+    chemical_id = chemical_id_match.group(1).upper() if chemical_id_match else None
+    compact = re.sub(r"[\s，。！？,.!?]", "", user_text.strip())
+    digit_match = re.search(r"第?(\d+)(个|项|条)?", compact)
+    if digit_match:
+        return int(digit_match.group(1)) - 1, chemical_id
+    chinese_match = re.search(r"第?([一二三四五六七八九十两]+)(个|项|条)?", compact)
+    if chinese_match:
+        value = _chinese_ordinal_to_int(chinese_match.group(1))
+        if value is not None:
+            return value - 1, chemical_id
+    return None, chemical_id
+
+
+def _chinese_ordinal_to_int(text: str) -> int | None:
+    digits = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    if text == "十":
+        return 10
+    if text.startswith("十") and len(text) == 2:
+        tail = digits.get(text[1])
+        return 10 + tail if tail is not None else None
+    if text.endswith("十") and len(text) == 2:
+        head = digits.get(text[0])
+        return head * 10 if head is not None else None
+    if "十" in text and len(text) == 3:
+        head, tail = text.split("十", 1)
+        head_value = digits.get(head)
+        tail_value = digits.get(tail)
+        if head_value is not None and tail_value is not None:
+            return head_value * 10 + tail_value
+    return digits.get(text)
 
 
 # ─── /ws/voice ────────────────────────────────────────────────────

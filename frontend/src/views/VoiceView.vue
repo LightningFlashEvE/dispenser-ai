@@ -53,6 +53,20 @@
               原始识别：{{ voiceStore.currentDraft.asr.raw_text }}
             </span>
           </div>
+          <div v-if="catalogCandidates.length" class="draft-catalog-candidates">
+            <div class="draft-catalog-title">请选择具体化学品</div>
+            <button
+              v-for="(candidate, index) in catalogCandidates"
+              :key="candidate.chemical_id"
+              class="draft-catalog-option"
+              type="button"
+              @click="selectCatalogCandidate(index)"
+            >
+              <span class="draft-catalog-index">{{ index + 1 }}</span>
+              <span class="draft-catalog-main">{{ candidate.display_name }} / {{ candidate.grade || '未标注等级' }}</span>
+              <span class="draft-catalog-meta">CAS {{ candidate.cas_no || '未知' }}</span>
+            </button>
+          </div>
           <div v-for="row in draftRows" :key="row.label" class="draft-row">
             <span class="draft-field">{{ row.label }}</span>
             <span class="draft-value" :class="{ 'draft-value--missing': row.missing }">{{ row.value }}</span>
@@ -290,15 +304,23 @@ const draftRows = computed(() => {
   const missing = new Set(draft?.missing_slots ?? [])
   const pending = new Set(draft?.pending_confirmation_fields ?? [])
   return [
-    { label: '化学品', value: String(data.chemical_name ?? '待补充'), missing: missing.has('chemical_name'), needsConfirmation: pending.has('chemical_name') },
+    { label: '用户输入', value: String(data.chemical_name_text ?? data.chemical_name ?? '待补充'), missing: missing.has('chemical_id'), needsConfirmation: pending.has('chemical_id') },
+    { label: '系统匹配', value: formatCatalogMatch(data), missing: missing.has('chemical_id'), needsConfirmation: pending.has('catalog_candidate') || pending.has('chemical_id') },
     { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit'), needsConfirmation: pending.has('target_mass') || pending.has('mass_unit') },
     { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel'), needsConfirmation: pending.has('target_vessel') },
     { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
   ]
 })
+const catalogCandidates = computed(() => {
+  const candidates = voiceStore.currentDraft?.current_draft.catalog_candidates
+  return Array.isArray(candidates)
+    ? candidates as Array<{ chemical_id: string; display_name: string; cas_no?: string | null; grade?: string | null }>
+    : []
+})
 const hasDraftAsrConfirmation = computed(() => Boolean(voiceStore.currentDraft?.asr?.needs_confirmation))
 const canConfirmDraft = computed(() => Boolean(
-  voiceStore.currentDraft?.ready_for_review || hasDraftAsrConfirmation.value,
+  (voiceStore.currentDraft?.ready_for_review || hasDraftAsrConfirmation.value)
+  && !voiceStore.currentDraft?.pending_confirmation_fields?.includes('catalog_candidate'),
 ))
 const draftConfirmLabel = computed(() => (
   voiceStore.currentDraft?.status === 'PROPOSAL_CREATED'
@@ -347,6 +369,9 @@ function focusModify() {
   modifyMode.value = true
   nextTick(() => textInputEl.value?.focus())
 }
+function selectCatalogCandidate(index: number) {
+  voiceStore.sendText(`选择第${index + 1}个化学品`)
+}
 
 const PARAM_LABELS: Record<string, string> = {
   target_mass_mg: '目标质量', tolerance_mg: '允差', total_mass_mg: '总质量',
@@ -361,6 +386,15 @@ function formatParamVal(k: string, v: unknown) { return k.endsWith('_mg') && typ
 function formatDraftMass(value: unknown, unit: unknown) {
   if (value === null || value === undefined || value === '') return '待补充'
   return `${value} ${unit ?? ''}`.trim()
+}
+function formatCatalogMatch(data: Record<string, unknown>) {
+  if (data.catalog_match_status === 'NO_MATCH') return '未找到化学品'
+  if (data.catalog_match_status === 'MULTIPLE_CANDIDATES') return '待选择候选'
+  const name = data.chemical_display_name ?? data.chemical_name
+  if (!name) return '待 catalog 确认'
+  const grade = data.grade ? ` / ${data.grade}` : ''
+  const cas = data.cas_no ? ` / CAS ${data.cas_no}` : ''
+  return `${name}${grade}${cas}`
 }
 function formatExpiry(iso: string) {
   const d = new Date(iso)
@@ -421,6 +455,13 @@ function fmtTime(iso: string) {
 .draft-asr-warning { grid-column: 1 / -1; border: 1px solid rgba(255, 107, 0, 0.28); background: rgba(255, 107, 0, 0.08); color: #a64600; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
 .draft-asr-title { font-weight: 700; }
 .draft-asr-raw { color: var(--wf-text-muted); }
+.draft-catalog-candidates { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(20, 110, 245, 0.24); background: rgba(20, 110, 245, 0.06); border-radius: 6px; padding: 8px 10px; }
+.draft-catalog-title { font-size: 12px; font-weight: 700; color: var(--wf-blue); }
+.draft-catalog-option { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid var(--wf-border-dark); background: var(--wf-bg-page); border-radius: 4px; padding: 6px 8px; text-align: left; cursor: pointer; }
+.draft-catalog-option:hover { border-color: var(--wf-blue); background: rgba(20, 110, 245, 0.04); }
+.draft-catalog-index { width: 20px; height: 20px; border-radius: 50%; background: var(--wf-blue); color: var(--wf-white); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.draft-catalog-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--wf-text-main); }
+.draft-catalog-meta { font-size: 11px; color: var(--wf-text-muted); white-space: nowrap; }
 .draft-row { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
 .draft-field { width: 72px; color: var(--wf-text-muted); font-size: 12px; letter-spacing: 0.5px; flex-shrink: 0; }
 .draft-value { min-width: 0; color: var(--wf-text-main); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

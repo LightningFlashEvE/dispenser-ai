@@ -114,6 +114,8 @@ async def test_weighing_draft_collects_multiturn_patch_without_guessing():
     first_draft = manager.apply_patch(session_id, TaskType.WEIGHING, first_patch)
 
     assert first_draft.current_draft["chemical_name"] == "氯化钠"
+    assert first_draft.current_draft["chemical_id"] == "CHEM_NACL_AR_001"
+    assert first_draft.current_draft["catalog_match_status"] == "CONFIRMED"
     assert first_draft.current_draft["target_mass"] == 5
     assert first_draft.current_draft["mass_unit"] == "g"
     assert first_draft.current_draft["target_vessel"] is None
@@ -138,7 +140,10 @@ def test_weighing_validator_owns_completeness():
     result = validate_weighing_draft(
         {
             "task_type": "WEIGHING",
-            "chemical_name": "氯化钠",
+            "chemical_name_text": "氯化钠",
+            "chemical_id": "CHEM_NACL_AR_001",
+            "chemical_display_name": "氯化钠",
+            "catalog_match_status": "CONFIRMED",
             "target_mass": 5,
             "mass_unit": "g",
             "target_vessel": "A1",
@@ -168,6 +173,14 @@ def test_formal_intent_is_generated_only_after_ready_for_review():
     assert intent["intent_type"] == "dispense"
     assert intent["task_type"] == "WEIGHING"
     assert intent["reagent_hint"]["raw_text"] == "氯化钠"
+    assert intent["reagent_hint"]["guessed_code"] == "CHEM_NACL_AR_001"
+    assert intent["chemical_catalog"] == {
+        "chemical_id": "CHEM_NACL_AR_001",
+        "display_name": "氯化钠",
+        "cas_no": "7647-14-5",
+        "grade": "分析纯",
+        "matched_by": "catalog_lookup",
+    }
     assert intent["params"]["target_mass_mg"] == 5000
     assert intent["params"]["target_vessel"] == "A1"
     assert "command_id" not in intent
@@ -253,12 +266,14 @@ def test_unknown_and_hardware_fields_are_discarded():
             "motor_id": "motor_9",
             "pump_id": "pump_1",
             "valve_id": "valve_1",
+            "chemical_id": "CHEM_FAKE_999",
             "complete": True,
             "ready_for_review": True,
         },
     )
 
     assert draft.current_draft["chemical_name"] == "氯化钠"
+    assert draft.current_draft["chemical_id"] == "CHEM_NACL_AR_001"
     assert "slot_id" not in draft.current_draft
     assert "motor_id" not in draft.current_draft
     assert "pump_id" not in draft.current_draft
@@ -278,6 +293,99 @@ def test_empty_patch_does_not_destroy_existing_draft():
 
     assert updated.current_draft == before
     assert updated.missing_slots == ["target_vessel", "purpose"]
+
+
+def test_catalog_single_high_confidence_candidate_allows_ready_for_review():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_catalog_single",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "标准液",
+        },
+    )
+
+    assert draft.current_draft["chemical_name_text"] == "氯化钠"
+    assert draft.current_draft["chemical_id"] == "CHEM_NACL_AR_001"
+    assert draft.current_draft["chemical_display_name"] == "氯化钠"
+    assert draft.current_draft["cas_no"] == "7647-14-5"
+    assert draft.current_draft["grade"] == "分析纯"
+    assert draft.current_draft["catalog_match_status"] == "CONFIRMED"
+    assert draft.ready_for_review is True
+    assert "catalog_lookup_single_candidate" in [event.event_type for event in draft.events]
+
+
+def test_catalog_multiple_candidates_blocks_review_until_user_selects():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_catalog_multiple",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "乙醇",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "测试",
+        },
+    )
+
+    assert draft.current_draft["catalog_match_status"] == "MULTIPLE_CANDIDATES"
+    assert draft.current_draft["chemical_id"] is None
+    assert draft.ready_for_review is False
+    assert {"catalog_candidate", "chemical_id"}.issubset(set(draft.pending_confirmation_fields))
+    assert len(draft.current_draft["catalog_candidates"]) == 2
+
+
+def test_catalog_candidate_selection_confirms_chemical_and_allows_review():
+    manager = DraftManager()
+    manager.apply_patch(
+        "session_catalog_select",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "乙醇",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "测试",
+        },
+    )
+
+    selected = manager.confirm_catalog_candidate(
+        "session_catalog_select",
+        index=1,
+        user_message="选择第二个化学品",
+    )
+
+    assert selected.current_draft["chemical_id"] == "CHEM_ETHANOL_STD_001"
+    assert selected.current_draft["catalog_match_status"] == "CONFIRMED"
+    assert selected.pending_confirmation_fields == []
+    assert selected.ready_for_review is True
+    assert "catalog_candidate_confirmed" in [event.event_type for event in selected.events]
+
+
+def test_catalog_no_match_blocks_ready_for_review():
+    manager = DraftManager()
+    draft = manager.apply_patch(
+        "session_catalog_none",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "不存在试剂",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+            "purpose": "测试",
+        },
+    )
+
+    assert draft.current_draft["catalog_match_status"] == "NO_MATCH"
+    assert draft.current_draft["chemical_id"] is None
+    assert draft.ready_for_review is False
+    assert "chemical_id" in draft.missing_slots
+    assert "catalog_lookup_no_match" in [event.event_type for event in draft.events]
 
 
 def test_text_patch_without_asr_metadata_can_reach_ready_for_review():
@@ -364,7 +472,7 @@ def test_low_confidence_asr_blocks_ready_for_review_and_preserves_raw_text():
         "needs_confirmation": True,
     }
     assert set(draft.pending_confirmation_fields) == {
-        "chemical_name",
+        "chemical_name_text",
         "mass_unit",
         "target_mass",
         "target_vessel",
@@ -471,6 +579,8 @@ def test_draft_store_recovers_active_draft_after_restart(tmp_path):
     assert restored.missing_slots == ["target_vessel", "purpose"]
     assert [event.event_type for event in restored.events] == [
         "draft_created",
+        "catalog_lookup_started",
+        "catalog_lookup_single_candidate",
         "patch_applied",
         "validation_failed",
     ]

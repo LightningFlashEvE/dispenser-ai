@@ -282,7 +282,7 @@ async def test_weighing_draft_websocket_asr_guard_flow(monkeypatch):
     assert guarded["data"]["ready_for_review"] is False
     assert guarded["data"]["asr"]["raw_text"] == "帮我称五克绿化钠，放到 A1，做标准液"
     assert guarded["data"]["asr"]["needs_confirmation"] is True
-    assert "chemical_name" in guarded["data"]["pending_confirmation_fields"]
+    assert "chemical_name_text" in guarded["data"]["pending_confirmation_fields"]
     assert "语音识别内容" in _last_message(fake_ws.messages, "chat.done")["text"]
 
     await channels._process_text_input(dispatcher, session, "client_asr", "确认")
