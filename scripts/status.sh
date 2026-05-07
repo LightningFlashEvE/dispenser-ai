@@ -43,11 +43,33 @@ check_service() {
     echo ""
 }
 
+get_port_pid() {
+    local port="$1" pids
+    if command -v fuser &>/dev/null; then
+        pids=$(fuser "${port}/tcp" 2>/dev/null | xargs -r echo)
+        echo "${pids}" | awk '{print $1}'
+    elif command -v ss &>/dev/null; then
+        ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1
+    elif command -v lsof &>/dev/null; then
+        lsof -ti tcp:"${port}" 2>/dev/null | head -1
+    fi
+}
+
 check_frontend() {
     local health_url="https://127.0.0.1:5173"
     if ! curl -ksf "${health_url}" >/dev/null 2>&1; then
         health_url="http://127.0.0.1:5173"
     fi
+
+    # 端口兜底：PID文件缺失时通过端口监听进程补充
+    if [ ! -f ".frontend.pid" ]; then
+        local port_pid
+        port_pid=$(get_port_pid 5173)
+        if [ -n "${port_pid}" ] && kill -0 "${port_pid}" 2>/dev/null; then
+            echo "${port_pid}" > ".frontend.pid"
+        fi
+    fi
+
     check_service "frontend" ".frontend.pid" "${health_url}"
 }
 

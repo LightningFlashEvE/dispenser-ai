@@ -282,6 +282,11 @@ if [ "${PROD_MODE}" = false ]; then
     if is_port_listening 5173; then
         if frontend_scheme_matches "${FRONTEND_WAIT_URL}"; then
             ok "frontend 已在监听 :5173（Vite 运行中）"
+            # 兜底重建可能丢失的 PID 文件
+            if [ ! -f "${PID_FILE_FE}" ]; then
+                re_pid="$(port_pids 5173 2>/dev/null | awk '{print $1}')"
+                [ -n "${re_pid}" ] && echo "${re_pid}" > "${PID_FILE_FE}"
+            fi
         else
             warn "frontend 已监听 :5173，但当前协议与预期不一致"
             if ! stop_port_processes 5173 "frontend"; then
@@ -293,6 +298,11 @@ if [ "${PROD_MODE}" = false ]; then
     if is_port_listening 5173; then
         if frontend_scheme_matches "${FRONTEND_WAIT_URL}"; then
             :
+            # 兜底重建可能丢失的 PID 文件
+            if [ ! -f "${PID_FILE_FE}" ]; then
+                re_pid="$(port_pids 5173 2>/dev/null | awk '{print $1}')"
+                [ -n "${re_pid}" ] && echo "${re_pid}" > "${PID_FILE_FE}"
+            fi
         else
             warn "frontend 端口仍被占用，跳过重新启动"
         fi
