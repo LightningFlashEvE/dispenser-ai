@@ -76,7 +76,7 @@ async def test_extract_weighing_name_mass_unit():
 
 
 @pytest.mark.asyncio
-async def test_extract_weighing_target_vessel_and_purpose():
+async def test_extract_weighing_target_vessel_without_purpose():
     extractor = AIExtractor()
     patch = await extractor.extract_patch(
         TaskType.WEIGHING,
@@ -85,7 +85,33 @@ async def test_extract_weighing_target_vessel_and_purpose():
     )
 
     assert patch["target_vessel"] == "A1"
-    assert patch["purpose"] == "标准液"
+    assert "purpose" not in patch
+
+
+@pytest.mark.asyncio
+async def test_extract_weighing_mass_update_without_unit_keeps_numeric_value():
+    extractor = AIExtractor()
+    patch = await extractor.extract_patch(
+        TaskType.WEIGHING,
+        {"target_mass": 5, "mass_unit": "g"},
+        "质量改为100",
+    )
+
+    assert patch["target_mass"] == 100
+    assert "mass_unit" not in patch
+
+
+@pytest.mark.asyncio
+async def test_sanitize_weighing_mass_string_with_unit():
+    class FakeLLM:
+        async def _call(self, messages, *, force_json):
+            return '{"patch": {"target_mass": "100g"}}'
+
+    extractor = AIExtractor(FakeLLM())
+    patch = await extractor.extract_patch(TaskType.WEIGHING, {}, "质量改为100g")
+
+    assert patch["target_mass"] == 100
+    assert patch["mass_unit"] == "g"
 
 
 @pytest.mark.asyncio
@@ -133,7 +159,7 @@ async def test_weighing_draft_collects_multiturn_patch_without_guessing():
     assert first_draft.current_draft["target_vessel"] is None
     assert first_draft.current_draft["purpose"] is None
     assert first_draft.ready_for_review is False
-    assert first_draft.missing_slots == ["target_vessel", "purpose"]
+    assert first_draft.missing_slots == ["target_vessel"]
 
     second_patch = await extractor.extract_patch(
         TaskType.WEIGHING,
@@ -143,7 +169,7 @@ async def test_weighing_draft_collects_multiturn_patch_without_guessing():
     second_draft = manager.apply_patch(session_id, TaskType.WEIGHING, second_patch)
 
     assert second_draft.current_draft["target_vessel"] == "A1"
-    assert second_draft.current_draft["purpose"] == "标准液"
+    assert second_draft.current_draft["purpose"] is None
     assert second_draft.ready_for_review is True
     assert second_draft.missing_slots == []
 
@@ -304,7 +330,7 @@ def test_empty_patch_does_not_destroy_existing_draft():
     updated = manager.apply_patch("session_test", TaskType.WEIGHING, {})
 
     assert updated.current_draft == before
-    assert updated.missing_slots == ["target_vessel", "purpose"]
+    assert updated.missing_slots == ["target_vessel"]
 
 
 def test_catalog_single_high_confidence_candidate_allows_ready_for_review():
@@ -588,7 +614,7 @@ def test_draft_store_recovers_active_draft_after_restart(tmp_path):
     assert restored is not None
     assert restored.draft_id == first_draft.draft_id
     assert restored.current_draft["chemical_name"] == "氯化钠"
-    assert restored.missing_slots == ["target_vessel", "purpose"]
+    assert restored.missing_slots == ["target_vessel"]
     assert [event.event_type for event in restored.events] == [
         "draft_created",
         "catalog_lookup_started",
@@ -596,6 +622,56 @@ def test_draft_store_recovers_active_draft_after_restart(tmp_path):
         "patch_applied",
         "validation_failed",
     ]
+
+
+def test_active_draft_revalidates_legacy_purpose_missing_slot(tmp_path):
+    store_path = tmp_path / "drafts.db"
+    manager = DraftManager(store=SQLiteDraftStore(store_path))
+    draft = manager.apply_patch(
+        "session_legacy_purpose",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": 5,
+            "mass_unit": "g",
+            "target_vessel": "A1",
+        },
+    )
+    draft.missing_slots = ["purpose"]
+    draft.ready_for_review = False
+    draft.status = DraftStatus.COLLECTING
+    manager._save(draft)
+
+    restored_manager = DraftManager(store=SQLiteDraftStore(store_path))
+    restored = restored_manager.get_active("session_legacy_purpose")
+
+    assert restored is not None
+    assert restored.missing_slots == []
+    assert restored.ready_for_review is True
+
+
+def test_active_draft_normalizes_legacy_mass_string(tmp_path):
+    store_path = tmp_path / "drafts.db"
+    manager = DraftManager(store=SQLiteDraftStore(store_path))
+    draft = manager.apply_patch(
+        "session_legacy_mass",
+        TaskType.WEIGHING,
+        {
+            "chemical_name": "氯化钠",
+            "target_mass": "100g",
+            "mass_unit": "g",
+            "target_vessel": "A1",
+        },
+    )
+    manager._save(draft)
+
+    restored_manager = DraftManager(store=SQLiteDraftStore(store_path))
+    restored = restored_manager.get_active("session_legacy_mass")
+
+    assert restored is not None
+    assert restored.current_draft["target_mass"] == 100
+    assert restored.current_draft["mass_unit"] == "g"
+    assert restored.ready_for_review is True
 
 
 def test_proposal_created_draft_is_persisted_for_audit(tmp_path):

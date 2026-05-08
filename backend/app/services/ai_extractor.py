@@ -15,7 +15,6 @@ ALLOWED_PATCH_FIELDS: dict[TaskType, set[str]] = {
         "target_mass",
         "mass_unit",
         "target_vessel",
-        "purpose",
     },
     TaskType.DISPENSING: {
         "source_material_text",
@@ -23,7 +22,6 @@ ALLOWED_PATCH_FIELDS: dict[TaskType, set[str]] = {
         "amount_per_portion",
         "amount_unit",
         "target_vessels",
-        "purpose",
     },
 }
 
@@ -36,7 +34,7 @@ AI_EXTRACTOR_PROMPT = """\
 3. 不要判断信息是否完整
 4. 不要生成最终 intent、proposal、command
 5. 不要生成 slot_id、motor_id、pump_id、valve_id 等硬件字段
-6. 不要自动选择化学品规格、工位、容器或用途
+6. 不要自动选择化学品规格、工位或容器
 
 任务类型：{task_type}
 当前草稿：{current_draft}
@@ -98,6 +96,18 @@ def _sanitize_patch(task_type: TaskType, patch: dict[str, Any]) -> dict[str, Any
             continue
         if value is None or value == "":
             continue
+        if key in {"target_mass", "amount_per_portion"}:
+            parsed = _parse_amount_value(value)
+            if parsed is None:
+                continue
+            clean[key] = parsed[0]
+            unit_key = "mass_unit" if key == "target_mass" else "amount_unit"
+            if parsed[1] and unit_key in allowed:
+                clean[unit_key] = _normalize_unit(parsed[1])
+            continue
+        if key in {"mass_unit", "amount_unit"}:
+            clean[key] = _normalize_unit(str(value))
+            continue
         clean[key] = value
     return clean
 
@@ -123,6 +133,14 @@ def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:
     if mass_match:
         patch["target_mass"] = float(mass_match.group("value"))
         patch["mass_unit"] = _normalize_unit(mass_match.group("unit"))
+    else:
+        mass_value_only = re.search(
+            r"(?:质量|重量|称量|称重)\s*(?:改成|改为|改|为|是)?\s*(?P<value>\d+(?:\.\d+)?)",
+            text,
+            re.I,
+        )
+        if mass_value_only:
+            patch["target_mass"] = float(mass_value_only.group("value"))
 
     vessel_match = re.search(r"(?:放到|放入|放|到|容器|工位)\s*(?P<vessel>[A-Za-z]\d+|\d+号?工位)", text)
     if vessel_match:
@@ -132,15 +150,21 @@ def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:
         if simple_vessel:
             patch["target_vessel"] = simple_vessel.group("vessel").upper()
 
-    purpose_match = re.search(r"(?:用于|用来|做|制备|用途是)\s*(?P<purpose>[^，。,.]+)", text)
-    if purpose_match:
-        patch["purpose"] = purpose_match.group("purpose").strip()
-
     chemical = _extract_chemical_name(text)
     if chemical:
         patch["chemical_name"] = chemical
 
     return patch
+
+
+def _parse_amount_value(value: Any) -> tuple[float, str | None] | None:
+    if isinstance(value, (int, float)):
+        return float(value), None
+    text = str(value).strip()
+    match = re.fullmatch(r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>mg|g|kg|毫克|克|千克)?", text, re.I)
+    if not match:
+        return None
+    return float(match.group("value")), match.group("unit")
 
 
 def _extract_dispensing_with_rules(text: str) -> dict[str, Any]:
@@ -164,10 +188,6 @@ def _extract_dispensing_with_rules(text: str) -> dict[str, Any]:
     vessels = _extract_target_vessels(text)
     if vessels:
         patch["target_vessels"] = vessels
-
-    purpose_match = re.search(r"(?:用于|用来|做|制备|用途是)\s*(?P<purpose>[^，。,.]+)", text)
-    if purpose_match:
-        patch["purpose"] = purpose_match.group("purpose").strip()
 
     material = _extract_source_material(text)
     if material:

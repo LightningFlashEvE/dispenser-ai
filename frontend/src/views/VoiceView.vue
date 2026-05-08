@@ -53,7 +53,7 @@
               原始识别：{{ voiceStore.currentDraft.asr.raw_text }}
             </span>
           </div>
-          <div v-if="catalogCandidates.length" class="draft-catalog-candidates">
+          <div v-if="shouldShowCatalogCandidates" class="draft-catalog-candidates">
             <div class="draft-catalog-title">请选择具体化学品</div>
             <button
               v-for="(candidate, index) in catalogCandidates"
@@ -318,14 +318,12 @@ const draftRows = computed(() => {
       { label: '份数', value: String(data.portion_count ?? '待补充'), missing: missing.has('portion_count'), needsConfirmation: pending.has('portion_count') },
       { label: '每份', value: formatDraftMass(data.amount_per_portion, data.amount_unit), missing: missing.has('amount_per_portion') || missing.has('amount_unit'), needsConfirmation: pending.has('amount_per_portion') || pending.has('amount_unit') },
       { label: '目标容器', value: formatVessels(data.target_vessels), missing: missing.has('target_vessels'), needsConfirmation: pending.has('target_vessels') },
-      { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
     ]
   }
   return [
     ...baseRows,
     { label: '目标质量', value: formatDraftMass(data.target_mass, data.mass_unit), missing: missing.has('target_mass') || missing.has('mass_unit'), needsConfirmation: pending.has('target_mass') || pending.has('mass_unit') },
     { label: '目标容器', value: String(data.target_vessel ?? '待补充'), missing: missing.has('target_vessel'), needsConfirmation: pending.has('target_vessel') },
-    { label: '用途', value: String(data.purpose ?? '待补充'), missing: missing.has('purpose'), needsConfirmation: pending.has('purpose') },
   ]
 })
 const catalogCandidates = computed(() => {
@@ -334,6 +332,10 @@ const catalogCandidates = computed(() => {
     ? candidates as Array<{ chemical_id: string; display_name: string; cas_no?: string | null; grade?: string | null }>
     : []
 })
+const shouldShowCatalogCandidates = computed(() => Boolean(
+  catalogCandidates.value.length
+  && voiceStore.currentDraft?.pending_confirmation_fields?.includes('catalog_candidate'),
+))
 const hasDraftAsrConfirmation = computed(() => Boolean(voiceStore.currentDraft?.asr?.needs_confirmation))
 const canConfirmDraft = computed(() => Boolean(
   (voiceStore.currentDraft?.ready_for_review || hasDraftAsrConfirmation.value)

@@ -17,7 +17,6 @@ SLOT_LABELS = {
     "amount_unit": "单位",
     "target_vessels": "目标容器",
     "target_vessel": "目标容器",
-    "purpose": "本次任务用途",
 }
 
 
@@ -77,15 +76,15 @@ def build_draft_reply(draft: TaskDraftRecord) -> str:
                 f"将 {data.get('chemical_display_name') or data.get('source_material_text')} "
                 f"分成 {data.get('portion_count')} 份，"
                 f"每份 {_format_amount(data.get('amount_per_portion'))}{data.get('amount_unit')}，"
-                f"放入 {', '.join(data.get('target_vessels') or [])}，"
-                f"用于{data.get('purpose')}。{catalog}请确认是否正确。"
+                f"放入 {', '.join(data.get('target_vessels') or [])}。"
+                f"{catalog}请确认是否正确。"
             )
         return (
             "我理解为："
             f"称量 {_format_amount(data.get('target_mass'))}{data.get('mass_unit')} "
             f"{data.get('chemical_display_name') or data.get('chemical_name')}，"
-            f"放入 {data.get('target_vessel')}，"
-            f"用于{data.get('purpose')}。{catalog}请确认是否正确。"
+            f"放入 {data.get('target_vessel')}。"
+            f"{catalog}请确认是否正确。"
         )
 
     labels = [SLOT_LABELS.get(slot, slot) for slot in draft.missing_slots]

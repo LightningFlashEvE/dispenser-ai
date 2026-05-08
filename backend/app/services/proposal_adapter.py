@@ -37,7 +37,6 @@ def weighing_draft_to_legacy_dispense_intent(draft: TaskDraftRecord) -> dict[str
         "raw_asr_text": draft_summary(data),
         "confidence": 1.0,
         "draft_id": draft.draft_id,
-        "purpose": data.get("purpose"),
         "chemical_catalog": {
             "chemical_id": chemical_id,
             "display_name": chemical_name,
@@ -80,7 +79,6 @@ def dispensing_draft_to_legacy_aliquot_intent(draft: TaskDraftRecord) -> dict[st
         "raw_asr_text": dispensing_draft_summary(data),
         "confidence": 1.0,
         "draft_id": draft.draft_id,
-        "purpose": data.get("purpose"),
         "chemical_catalog": {
             "chemical_id": chemical_id,
             "display_name": chemical_name,
@@ -104,8 +102,7 @@ def mass_to_mg(value: Any, unit: Any) -> int:
 def draft_summary(data: dict[str, Any]) -> str:
     return (
         f"称量 {data.get('target_mass')}{data.get('mass_unit')} "
-        f"{data.get('chemical_display_name') or data.get('chemical_name')} 到 {data.get('target_vessel')}，"
-        f"用途：{data.get('purpose')}"
+        f"{data.get('chemical_display_name') or data.get('chemical_name')} 到 {data.get('target_vessel')}"
     )
 
 
@@ -114,6 +111,5 @@ def dispensing_draft_summary(data: dict[str, Any]) -> str:
         f"分料 {data.get('portion_count')} 份，"
         f"每份 {data.get('amount_per_portion')}{data.get('amount_unit')} "
         f"{data.get('chemical_display_name') or data.get('source_material_text')}，"
-        f"目标容器：{', '.join(data.get('target_vessels') or [])}，"
-        f"用途：{data.get('purpose')}"
+        f"目标容器：{', '.join(data.get('target_vessels') or [])}"
     )

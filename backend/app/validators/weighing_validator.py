@@ -8,7 +8,6 @@ REQUIRED_WEIGHING_SLOTS = [
     "target_mass",
     "mass_unit",
     "target_vessel",
-    "purpose",
 ]
 
 VALID_MASS_UNITS = {"mg", "g", "kg", "毫克", "克", "千克"}

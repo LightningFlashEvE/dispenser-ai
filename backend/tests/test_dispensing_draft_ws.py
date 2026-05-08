@@ -85,7 +85,7 @@ async def test_dispensing_draft_websocket_text_flow(monkeypatch):
     assert first_draft["data"]["task_type"] == "DISPENSING"
     assert first_draft["data"]["status"] == "COLLECTING"
     assert first_draft["data"]["current_draft"]["chemical_id"] == "CHEM_NACL_AR_001"
-    assert first_draft["data"]["missing_slots"] == ["target_vessels", "purpose"]
+    assert first_draft["data"]["missing_slots"] == ["target_vessels"]
 
     await channels._process_text_input(dispatcher, session, "client_dispensing", "放 A1 A2 A3，做测试样品")
     ready_draft = _last_message(fake_ws.messages, "draft_update")

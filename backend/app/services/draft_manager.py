@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+import re
 
 from app.schemas.task_draft_schema import DraftEvent, DraftStatus, TaskDraftRecord, TaskType
 from app.schemas.dispensing_draft_schema import DISPENSING_DRAFT_DEFAULT
@@ -48,11 +49,15 @@ class DraftManager:
         self._drafts_by_id: dict[str, TaskDraftRecord] = {}
         if self._store is not None:
             for draft in self._store.load_all():
+                if draft.status in self.ACTIVE_STATUSES:
+                    draft = self._validate_and_stamp(draft)
                 self._register(draft)
 
     def get_active(self, session_id: str) -> TaskDraftRecord | None:
         draft = self._drafts_by_session.get(session_id)
         if draft and draft.status in self.ACTIVE_STATUSES:
+            draft = self._validate_and_stamp(draft)
+            self._save(draft)
             return draft
         return None
 
@@ -467,6 +472,7 @@ class DraftManager:
         return list(self._drafts_by_id.values())
 
     def _validate_and_stamp(self, draft: TaskDraftRecord) -> TaskDraftRecord:
+        self._normalize_numeric_fields(draft)
         if draft.task_type == TaskType.WEIGHING:
             result = validate_weighing_draft(draft.current_draft)
         elif draft.task_type == TaskType.MIXING:
@@ -488,6 +494,25 @@ class DraftManager:
             )
         draft.updated_at = datetime.now(timezone.utc)
         return draft
+
+    def _normalize_numeric_fields(self, draft: TaskDraftRecord) -> None:
+        if draft.task_type == TaskType.WEIGHING:
+            self._normalize_amount_pair(draft.current_draft, "target_mass", "mass_unit")
+        elif draft.task_type == TaskType.DISPENSING:
+            self._normalize_amount_pair(draft.current_draft, "amount_per_portion", "amount_unit")
+
+    def _normalize_amount_pair(self, data: dict[str, Any], value_key: str, unit_key: str) -> None:
+        value = data.get(value_key)
+        if isinstance(value, str):
+            match = re.fullmatch(r"\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>mg|g|kg|毫克|克|千克)?\s*", value, re.I)
+            if match:
+                data[value_key] = float(match.group("value"))
+                if match.group("unit"):
+                    data[unit_key] = _normalize_mass_unit(match.group("unit"))
+
+        unit = data.get(unit_key)
+        if isinstance(unit, str):
+            data[unit_key] = _normalize_mass_unit(unit)
 
     def _apply_asr_guard(
         self,
@@ -532,5 +557,9 @@ class DraftManager:
         self._register(draft)
         if self._store is not None:
             self._store.save(draft)
+def _normalize_mass_unit(unit: str) -> str:
+    normalized = unit.lower()
+    return {"毫克": "mg", "克": "g", "千克": "kg"}.get(normalized, normalized)
+
 
 draft_manager = DraftManager(store=SQLiteDraftStore())

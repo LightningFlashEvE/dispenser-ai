@@ -14,7 +14,6 @@ def validate_dispensing_draft(draft: dict) -> DraftValidationResult:
             "amount_per_portion",
             "amount_unit",
             "target_vessels",
-            "purpose",
         )
         if draft.get(slot) in (None, "", [])
     ]

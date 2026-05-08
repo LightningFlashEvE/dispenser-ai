@@ -105,10 +105,9 @@ async def test_weighing_draft_websocket_text_flow(monkeypatch):
     await channels._process_text_input(dispatcher, session, "client_1", "帮我称 5g 氯化钠")
     first_draft = _last_message(fake_ws.messages, "draft_update")
     assert first_draft["data"]["status"] == "COLLECTING"
-    assert first_draft["data"]["missing_slots"] == ["target_vessel", "purpose"]
+    assert first_draft["data"]["missing_slots"] == ["target_vessel"]
     first_reply = _last_message(fake_ws.messages, "chat.done")
     assert "目标容器" in first_reply["text"]
-    assert "本次任务用途" in first_reply["text"]
 
     await channels._process_text_input(dispatcher, session, "client_1", "放 A1，做标准液")
     ready_draft = _last_message(fake_ws.messages, "draft_update")

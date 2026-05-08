@@ -60,7 +60,7 @@ async def test_extract_dispensing_source_count_amount_unit():
 
 
 @pytest.mark.asyncio
-async def test_extract_dispensing_vessels_and_purpose():
+async def test_extract_dispensing_vessels_without_purpose():
     extractor = AIExtractor()
     patch = await extractor.extract_patch(
         TaskType.DISPENSING,
@@ -69,7 +69,7 @@ async def test_extract_dispensing_vessels_and_purpose():
     )
 
     assert patch["target_vessels"] == ["A1", "A2", "A3"]
-    assert patch["purpose"] == "测试样品"
+    assert "purpose" not in patch
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_dispensing_draft_multiturn_reaches_ready_for_review():
 
     assert first.current_draft["chemical_id"] == "CHEM_NACL_AR_001"
     assert first.current_draft["catalog_match_status"] == "CONFIRMED"
-    assert first.missing_slots == ["target_vessels", "purpose"]
+    assert first.missing_slots == ["target_vessels"]
     assert first.ready_for_review is False
 
     second_patch = await extractor.extract_patch(
@@ -98,7 +98,7 @@ async def test_dispensing_draft_multiturn_reaches_ready_for_review():
     second = manager.apply_patch(session_id, TaskType.DISPENSING, second_patch)
 
     assert second.current_draft["target_vessels"] == ["A1", "A2", "A3"]
-    assert second.current_draft["purpose"] == "测试样品"
+    assert second.current_draft["purpose"] is None
     assert second.status == DraftStatus.READY_FOR_REVIEW
     assert second.ready_for_review is True
 
