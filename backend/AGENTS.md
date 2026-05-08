@@ -8,10 +8,10 @@
 
 后端运行在 Jetson 主控上，负责：
 
-1. 语音链路：VAD → ASR(whisper.cpp) → LLM(llama.cpp server) → intent_json → 规则引擎 → command JSON → TTS(MeloTTS)
+1. 语音链路：VAD → ASR(whisper.cpp) → ASR guard → Intent Router → AIExtractor patch → DraftManager → Validator → catalog lookup → 结构化确认 → 规则引擎 → command JSON → TTS(MeloTTS)
 2. 视觉链路：固定 ROI 检测 → 二维码识别 → 坐标换算
 3. 天平驱动：MT-SICS over RS422-USB，读取重量 → mg 整数 → WebSocket 推前端 + 执行监控
-4. 控制适配层：intent_json 校验（`shared/intent_schema.json`）、规则引擎、状态机、command JSON 生成（`shared/command_schema.json`）、TCP 通信
+4. 控制适配层：proposal / intent 校验（`shared/intent_schema.json`）、规则引擎、状态机、command JSON 生成（`shared/command_schema.json`）、TCP 通信
 5. 数据管理：药品（含多语言名称/别名/摩尔质量）、配方、工位、任务、日志、异常
 6. 与 C++ 后级控制程序通过 **TCP + JSON** 通信（不是 localhost HTTP，是 TCP）
 
@@ -35,11 +35,18 @@
 
 ## 关键边界
 
-1. LLM **在对话阶段输出自然语言**（dialog_reply），**在命令阶段输出 intent_json**（格式见 `shared/intent_schema.json`）
-2. `command JSON`（格式见 `shared/command_schema.json`）由规则引擎生成，字段值来自数据库
-3. 后端天平驱动只负责读数，不直接控制下料电机（下料由 C++ 控制）
-4. 后端不直接进行设备级动作控制（机械臂/电机/IO 联锁均由 C++ 负责）
-5. C++ 后级控制程序负责机械臂、下料电机、IO 联锁与急停逻辑
+1. AIExtractor 只输出字段 patch，不输出 `complete` / `ready_for_review` 的可信判断，不生成最终 intent / command。
+2. `chemical_id` 只能来自 catalog lookup 或用户候选选择，AI 不能写入。
+3. AI 不能写 `slot_id` / `motor_id` / `pump_id` / `valve_id` / `station_id` 等控制层字段。
+4. DraftManager 负责合并 patch、过滤非法字段、持久化 draft、记录 audit events。
+5. Validator 负责判断 `missing_slots` / `pending_confirmation_fields` / `READY_FOR_REVIEW`。
+6. `command JSON`（格式见 `shared/command_schema.json`）由规则引擎和 adapter 层生成，字段值来自数据库和已确认 catalog 数据。
+7. 用户确认 = `self_approved`，但必须先通过规则引擎、状态机、库存和设备状态校验。
+8. 规则通过才允许 `build_command()` / `send_command()`；规则失败不下发。
+9. 重复确认不能重复生成 proposal 或重复下发 command。
+10. 后端天平驱动只负责读数，不直接控制下料电机（下料由 C++ 控制）。
+11. 后端不直接进行设备级动作控制（机械臂/电机/IO 联锁均由 C++ 负责）。
+12. C++ 后级控制程序负责机械臂、下料电机、IO 联锁与急停逻辑。
 
 ---
 
@@ -68,38 +75,36 @@ backend/
 
 ## 核心执行链路
 
-系统采用**两阶段对话交互**：
-
-### 阶段一：对话阶段（Dialog Mode）
+系统采用 **draft workflow**，后端负责状态和执行判断：
 
 ```
-二进制 PCM 音频帧 / 表单输入
+二进制 PCM 音频帧 / 文本输入 / 前端表单
   ↓
 audio.commit → whisper-server ASR → asr.final
   ↓
-LLM process_dialog() → dialog_reply（自然语言，force_json=False）
+ASR guard（raw_text / normalized_text / confidence / needs_confirmation）
   ↓
-WebSocket 推 dialog_reply → 前端展示 + TTS 播报
-```
-
-- `process_dialog()`：自然语言交互，`force_json=False`，`DIALOG_SYSTEM_PROMPT`
-- 用于闲聊、查询、补槽澄清；**不**生成 intent_json
-- 对话阶段**不阻塞**：LLM 输出自然语言回复后立刻返回，**不串行调用**后台 intent 解析
-- 用户可自由多轮对话，补充槽位信息
-- 前端录音开始前必须先确认 WebSocket 已连接；若连接断开，直接提示并取消本次录音，避免无效音频提交
-
-### 阶段二：命令阶段（Command Mode）
-
-```
-用户点击"确认执行"按钮 → 前端发 confirm 消息
+Intent Router（普通对话、查询、start_task、update_task、cancel_task、confirm_task）
   ↓
-LLM resolve_intent_from_dialog() → 从完整对话历史解析 intent_json（force_json=True）
+AIExtractor patch（只提取本轮字段，不生成 command，不写 chemical_id）
   ↓
-规则引擎：校验 intent_json + 查药品库 → command JSON
+DraftManager merge（session 级 draft，非法字段过滤，审计事件，持久化）
   ↓
-状态机：确认设备就绪
+Validator（missing_slots / pending_confirmation_fields / READY_FOR_REVIEW）
   ↓
-TCP 下发 command JSON → C++ 后级控制程序
+Chemical Catalog lookup（0 候选阻止；多候选等待选择；chemical_id 后端写入）
+  ↓
+WebSocket 推 draft_update → 前端结构化确认卡片
+  ↓
+用户确认 → approval_mode=self_approved
+  ↓
+后端生成 proposal / intent JSON
+  ↓
+规则引擎 + 状态机 + 库存 + 设备状态校验
+  ↓
+build_command() → command JSON
+  ↓
+send_command() → C++ 后级控制程序
   ↓
 执行回调 → 日志落库 + WebSocket 推前端
 
@@ -107,10 +112,11 @@ TCP 下发 command JSON → C++ 后级控制程序
 pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 ```
 
-- `resolve_intent_from_dialog()`：从**完整对话历史**中解析意图
-  - 若信息不足：返回反问，用户继续补充
-  - 若信息完整：规则引擎校验 → command JSON → 状态机 → TCP 下发 → C++ 执行
-- **必须**通过规则引擎校验和状态机检查后才能执行
+- 普通聊天、库存查询、设备状态查询、配方查询属于只读/对话 route，不进入执行。
+- WEIGHING / DISPENSING 等任务必须先形成 draft，再进入结构化确认。
+- Formula 查询只读；Formula 选择生成 proposal，用户确认后也必须过规则校验才能执行。
+- 前端录音开始前必须先确认 WebSocket 已连接；若连接断开，直接提示并取消本次录音，避免无效音频提交。
+- **必须**通过规则引擎和状态机检查后才能执行。
 
 ---
 
@@ -133,6 +139,13 @@ pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 - **JSON 文件**：用于保存系统配置、标定参数、模型配置、规则模板以及 LLM 原始输出快照等层级较深、人工可读性要求较高的数据
 
 其中，SQLite 负责业务数据的规范化存储与可追溯查询，JSON 负责配置类和快照类数据的灵活管理与人工维护。高频实时控制状态原则上以内存态管理，必要时再按规则落库或落盘。
+
+### SQLite schema 变更规则
+
+- SQLite schema 变更必须写幂等 migration，不能只依赖 `Base.metadata.create_all()`。
+- `ADD COLUMN` 前必须检查列是否存在。
+- 不做破坏性迁移：不得静默删除表、删除列或清空业务数据。
+- 开发环境需要重置数据库时，先备份 `data/*.db`，再执行清理。
 
 ---
 
@@ -235,13 +248,17 @@ BALANCE_BAUD_RATE=9600
   - `audio_chunk` / `audio_end` / `transcript`
   - 旧版 base64 音频块必须做异常保护，坏包只返回错误，不允许打断整个 WebSocket 会话
 
-### Pending Intent 确认机制
+### Draft / Pending 确认机制
 
-- 用户描述完整意图（`is_complete=true` + 业务校验通过 + 药品匹配成功）后，dispatcher 会创建 `PendingIntent` 并通过 WebSocket 推 `pending_intent` 消息。
-- 前端 "确认执行" 按钮只在 `pending_intent != null` 时启用。
+- 用户描述任务时，dispatcher 只创建或更新 draft，通过 WebSocket 推 `draft_update`。
+- `READY_FOR_REVIEW` 只代表表单字段、ASR guard、catalog confirmation 已满足，可以展示确认卡片；不代表任务一定可执行。
+- 前端确认卡片只在 `ready_for_review=true` 时启用确认按钮。
 - 用户点击或说精确关键词（`确认执行 / 确认 / 开始执行 / 执行`）触发 `confirm` 消息。
+- 用户确认后，后端生成 proposal / intent，并标记 `approval_mode=self_approved`、`approved_by=current_operator`、`approved_at=...`。
+- 规则校验通过后才调用 `build_command()` / `send_command()`；规则失败返回原因并阻止下发。
 - `PENDING_INTENT_TTL_SEC` 秒后自动过期（默认 60s），避免误执行。
 - 不再用 `好的 / 是的 / 可以` 等宽泛关键词触发执行。
+- 重复确认必须幂等，不能重复创建 proposal 或重复下发 command。
 
 ## 天平通信说明（梅特勒 WKC204C）
 

@@ -29,12 +29,12 @@
 
 | 文件 | 用途 | 版本 |
 |------|------|------|
-| `shared/intent_schema.json` | LLM 输出的意图 JSON 格式，AI 层内部流转，规则引擎校验用 | v1.0 |
+| `shared/intent_schema.json` | 后端在用户确认 draft 后生成的正式 proposal / intent JSON，规则引擎校验用 | v1.0 |
 | `shared/command_schema.json` | 下发给 C++ 控制程序的执行指令格式，双方接口契约 | v2.1 |
 
 **两个 Schema 的区别：**
-- `intent_schema`：语义层，字段允许 null（表示用户未提供），LLM 填写，不保证业务正确性
-- `command_schema`：执行层，字段来自数据库，规则引擎填写，所有字段必须合法且通过校验
+- `intent_schema`：语义层，由后端基于已确认 draft / proposal 生成；AI 只能提供 patch，不能直接生成最终 intent
+- `command_schema`：执行层，字段来自数据库、catalog lookup、规则引擎和状态机，所有字段必须合法且通过校验
 
 ---
 
@@ -54,19 +54,31 @@
 ## 核心执行链路（施工时时刻牢记）
 
 ```
-语音/界面输入
+用户输入（语音 / 文本 / 前端表单）
   ↓
-ASR（whisper.cpp）/ 表单输入
+Intent Router（分流：普通对话、查询、开始/更新/取消/确认任务）
   ↓
-LLM（llama.cpp server）→ intent_json（见 shared/intent_schema.json）
+AIExtractor patch（AI 只提取本轮字段 patch）
   ↓
-规则引擎：校验 intent_json + 查药品库 → command JSON（见 shared/command_schema.json）
+DraftManager merge（后端合并 session 级 draft，记录审计事件）
   ↓
-状态机检查
+Validator（后端判断 missing_slots / ready_for_review）
   ↓
-C++ 后级控制程序（TCP + JSON）
+ASR guard（保留 raw_text / normalized_text / confidence，低置信关键字段先确认）
   ↓
-机械臂 / 下料电机 / 现场 IO
+Chemical Catalog lookup（chemical_id 只能来自 catalog lookup 或用户候选选择）
+  ↓
+前端结构化确认卡片（任务字段、catalog 匹配、ASR 提示、确认/修改/取消）
+  ↓
+用户确认 = self_approved（本机操作员确认即授权）
+  ↓
+后端规则校验（库存、单位、容器、设备状态、配方步骤等硬门槛）
+  ↓
+build_command（生成 shared/command_schema.json）
+  ↓
+send_command（TCP/HTTP 适配层下发最终 command JSON）
+  ↓
+C++ 控制层（只执行后端签发的 command JSON）
   ↓
 执行反馈 → 页面与语音反馈
 
@@ -75,48 +87,45 @@ C++ 后级控制程序（TCP + JSON）
 （称重闭环由 C++ 自主决定，AI 层不干涉）
 ```
 
-## 两阶段对话交互模式
+## Draft 对话任务模式
 
-系统采用**两阶段对话交互**，区分自然语言闲聊/确认与结构化任务执行：
+系统采用 **draft workflow**，把“语言理解”和“任务完整性 / 执行判断”分开：
 
-### 阶段一：对话阶段（Dialog Mode）
+### 对话与查询
 
-- **触发**：用户初始输入、补充槽位信息后
-- **后端处理**：`process_dialog()` — 自然语言交互，`force_json=False`
-- **System Prompt**：`DIALOG_SYSTEM_PROMPT`，强调中文回答、身份是"配药助手"
-- **返回**：前端收到 `dialog_reply` 消息，语音播报（TTS）
-- **典型场景**：用户问"我要配药"、"帮我查一下库存"、"这个药品是干嘛用的"
-- **关键**：此阶段**不**生成 intent_json，仅用于闲聊、查询、补槽澄清。
-  - 对话阶段**不阻塞**：LLM 输出自然语言回复后立刻返回，**不串行调用**后台 intent 解析
-  - 用户可自由多轮对话，补充槽位信息
+- 普通聊天、库存查询、设备状态查询、配方查询可以直接返回自然语言或只读结果。
+- 查询类结果不能被当成执行授权；例如 `query_formula` 只展示配方，`select_formula` 才进入 proposal。
+- 已有 active draft 时，用户后续输入默认更新当前 draft；第一版同一 session 同时只允许一个 active draft。
 
-### 阶段二：命令阶段（Command Mode）
+### 任务草稿收集
 
-- **触发**：
-  - 用户点击前端的"确认执行"按钮
-  - 前端发送 `confirm` 消息类型
-- **后端处理**：`resolve_intent_from_dialog()` — 从**完整对话历史**中解析意图，`force_json=True`
-  - 把多轮对话历史注入 LLM，提取最终意图
-  - 若信息不足：返回反问，用户继续补充
-  - 若信息完整：规则引擎校验 → command JSON → 状态机 → TCP 下发 → C++ 执行
-- **关键**：**必须**通过规则引擎校验和状态机检查后才能执行
+- Intent Router 负责保守分流：`start_task` / `update_task` / `cancel_task` / `confirm_task` / 查询类 route。
+- AIExtractor 只输出本轮字段 patch，不输出最终 command，不判断 `complete` / `ready_for_review`。
+- DraftManager 负责合并 patch、过滤非法字段、持久化 draft、记录 audit events。
+- Validator 负责判断 `missing_slots`、`pending_confirmation_fields` 和是否进入 `READY_FOR_REVIEW`。
+- ASR guard 对语音输入保留 `raw_text`、`normalized_text`、`confidence`、`needs_confirmation`；低置信关键字段必须先确认。
+- Chemical Catalog lookup 负责把用户文本匹配到真实化学品；`chemical_id` 只能来自 catalog lookup 或用户选择候选。
 
-### 前端"确认执行"按钮
+### 用户确认与执行
 
-- 对话阶段结束后，前端在存在 `pending_intent` 时展示"确认执行"按钮
-- 用户确认后，后端才从对话历史中解析意图并执行
-- 确认后进入 `PROCESSING` 状态，前端显示加载中
-- 若解析失败或信息不足，AI 会反问并返回对话阶段
+- 前端在 `READY_FOR_REVIEW` 时展示结构化确认卡片，而不是只依赖 AI 自然语言。
+- 用户确认卡片 = `self_approved`，表示当前本机操作员授权执行。
+- 用户确认不能绕过规则校验；后端必须先跑规则引擎 / 状态机 / 库存 / 设备状态检查。
+- 规则通过后才允许 `build_command()` 和 `send_command()`。
+- 规则失败必须返回失败原因，不下发 command。
+- 重复确认不能重复生成 proposal 或重复下发 command。
 
-### 关键边界
+### AI 绝对边界
 
-1. LLM **在对话阶段输出自然语言**（dialog_reply），**在命令阶段输出 intent_json**（格式见 `shared/intent_schema.json`）
-2. **后台 intent 解析改为异步触发**：对话阶段不串行解析，用户点击"确认执行"后才解析
-3. **command JSON** 由规则引擎生成，字段值来自数据库，不来自 LLM
-4. LLM **不直接输出底层运动控制指令**
-5. 前端不直接控制设备
-6. 所有执行必须经过规则引擎、状态机和控制白名单约束
-7. 天平直连 Jetson，不经过 C++ 控制程序
+1. AI 只能提取 patch。
+2. AI 不能判断任务完整性。
+3. AI 不能生成 command JSON。
+4. AI 不能写 `chemical_id`。
+5. AI 不能写 `slot_id` / `motor_id` / `pump_id` / `valve_id` / `station_id` 等控制层字段。
+6. `chemical_id` 只能来自 catalog lookup 或用户候选选择。
+7. command JSON 由后端规则引擎和 adapter 层生成，字段值来自已校验的后端数据。
+8. 前端不直接控制设备。
+9. 天平直连 Jetson，不经过 C++ 控制程序。
 
 ---
 
@@ -125,13 +134,15 @@ C++ 后级控制程序（TCP + JSON）
 1. USB 麦克风采集语音
 2. VAD 检测语音起止
 3. whisper.cpp 转写文字
-4. LLM（llama.cpp server）进行意图识别与槽位完整性判断，输出 `intent_json`
-5. 若槽位不足（`is_complete: false`）：TTS 播报 `clarification_question`，等待补充
-6. 若槽位完整：规则引擎查药品库补全字段，生成 `command JSON`
-7. 状态机确认设备就绪
-8. command JSON 通过 TCP 下发给 C++ 后级控制程序
-9. 执行期间天平数据持续推送前端，达到目标重量后通知 C++ 停止
-10. C++ 回调执行结果，写入日志并反馈到前端
+4. Intent Router 判断输入属于查询、普通对话、开始任务、更新任务、取消任务或确认任务
+5. AIExtractor 只提取字段 patch；后端 DraftManager 合并到当前 draft
+6. Validator 判断缺失字段；ASR guard 与 catalog lookup 判断是否需要人工确认关键字段 / 候选
+7. draft 完整后前端展示结构化确认卡片
+8. 用户确认后，后端生成 proposal / intent JSON，并标记 `approval_mode=self_approved`
+9. 规则引擎、状态机、库存和设备状态校验通过后，生成 command JSON
+10. command JSON 通过 TCP/HTTP 适配层下发给 C++ 后级控制程序
+11. 执行期间天平数据持续推送前端；称重闭环和停止时机由 C++ 控制程序自主决定
+12. C++ 回调执行结果，写入日志并反馈到前端
 
 ---
 
@@ -142,7 +153,7 @@ C++ 后级控制程序（TCP + JSON）
 - LLM：**Qwen3-4B-Instruct-2507-Q4_K_M**（通过 llama.cpp server 部署，接口 `http://localhost:8080/v1`，OpenAI 兼容格式，显存占约 2.5GB）
 - TTS：**MeloTTS**（本地服务化运行于 `http://127.0.0.1:8020`，CPU/GPU 自动切换，文本前置规范化）
 - 视觉：固定 ROI + QRCodeDetector，必要时加轻量检测模型
-- 前端：HTML / Vue 本地网页
+- 前端：Vue 3 + Vite + TypeScript + Pinia；ECharts 为主图表库；Tailwind + shadcn-vue 为主视觉；Element Plus 仅用于复杂表格、表单、弹窗、分页；lucide-vue-next 为主图标库
 - 后端：FastAPI
 - 数据存储：SQLite + JSON
 - 后级控制通信：**TCP + JSON**（与 C++ 控制程序通信，下发 command JSON，接收回调）
@@ -160,6 +171,13 @@ C++ 后级控制程序（TCP + JSON）
 
 其中，SQLite 负责业务数据的规范化存储与可追溯查询，JSON 负责配置类和快照类数据的灵活管理与人工维护。高频实时控制状态原则上以内存态管理，必要时再按规则落库或落盘。
 
+### SQLite schema 变更规则
+
+- SQLite schema 变更必须写幂等 migration，不能只依赖 `Base.metadata.create_all()`。
+- `ADD COLUMN` 前必须检查列是否存在。
+- 不做破坏性迁移：不得静默删除表、删除列或清空业务数据。
+- 开发环境需要重置数据库时，先备份 `data/*.db`，再执行清理。
+
 ---
 
 ## 绝对约束
@@ -168,14 +186,27 @@ C++ 后级控制程序（TCP + JSON）
 1. 信息不足必须先反问，不得直接执行
 2. LLM 不得直接驱动机械动作
 3. 未通过规则校验的任务一律拒绝执行
-4. 关键动作支持人工确认
-5. 日志、异常和执行反馈必须完整记录
+4. 用户确认任务 = 本机自审批，但不能绕过后端规则校验
+5. 规则通过才 `build_command` / `send_command`；规则失败不下发
+6. 重复确认不能重复下发
+7. 日志、异常和执行反馈必须完整记录
 
 ### 代码约束
 6. 禁止 `as any` / `@ts-ignore`
 7. 禁止空 catch 块
 8. 所有外部输入必须经过 Schema 校验
 9. 配置路径、模型路径、数据库路径必须从配置读取
+10. 不得随意引入新的 UI / 图表 / 状态管理库
+
+### 提交前检查命令
+
+```bash
+python -m pytest backend/tests/test_formula_selection_flow.py backend/tests/test_task_draft_flow.py backend/tests/test_task_draft_ws.py backend/tests/test_smoke.py backend/tests/test_asr_normalizer.py
+npm run typecheck
+npm run lint
+npm run build
+git diff --check
+```
 
 ---
 
@@ -379,11 +410,11 @@ MCP（Model Context Protocol）Server 将系统的核心能力封装为标准工
 ```
 用户: "我要配 500mg 氯化钠"
 AI: 调用 query_drug_stock("氯化钠") → 查到库存充足
-AI: "找到氯化钠了，在 3 号工位，库存 50g。确认执行吗？"
+AI: "找到氯化钠了，在 3 号工位，库存 50g。请在结构化确认卡片中确认。"
 用户: "确认"
-AI: 调用 generate_intent("配500mg氯化钠") → 生成 intent JSON
-AI: 调用 build_command(intent_json) → 生成 command JSON
-AI: 调用 send_command(command_json) → 下发到控制层
+后端: 基于已确认 draft / proposal 生成 intent JSON，并标记 self_approved
+后端: 调用 build_command(intent_json) → 生成 command JSON
+后端: 调用 send_command(command_json) → 下发到控制层
 AI: "已开始执行，预计 2 分钟完成"
 ```
 

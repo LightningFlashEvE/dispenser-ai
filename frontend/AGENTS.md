@@ -13,8 +13,13 @@
 | TypeScript | 5+ | 严格模式，禁止 any |
 | Pinia | 2+ | 状态管理 |
 | Vue Router | 4+ | 页面路由 |
-| Element Plus | 2+ | 工业触摸屏界面组件 |
-| echarts / wavesurfer.js | 最新 | 波形、状态与数据可视化 |
+| Tailwind + shadcn-vue | 当前项目版本 | 主视觉和常规组件体系 |
+| Element Plus | 2+ | 仅用于复杂表格、表单、弹窗、分页 |
+| ECharts | 最新 | 主图表库 |
+| wavesurfer.js | 最新 | 波形展示 |
+| lucide-vue-next | 最新 | 主图标库 |
+
+**不要随意引入新的 UI / 图表库。** 新增视觉、图表、图标需求优先复用 Tailwind + shadcn-vue、ECharts、lucide-vue-next；Element Plus 只在复杂数据录入和管理页面使用。
 
 ---
 
@@ -65,11 +70,14 @@ frontend/
 
 ### VoiceView.vue
 - 采用类似网页 AI 的对话流：用户消息气泡 → AI 流式回复气泡 → 待确认操作卡片
-- 显示当前状态：待机 / 聆听 / 识别中 / 思考中 / 回复中 / 等待确认 / 执行中 / 错误
+- 显示当前状态：待机 / 聆听 / 识别中 / 思考中 / 回复中 / 收集任务信息 / 等待用户确认 / 规则校验中 / 执行中 / 错误
 - 录音开始前先检查 WebSocket 连接；若未连接，立即提示，不进入“假录音”状态
 - 麦克风只在浏览器安全上下文中可用：本机 `localhost` 可用 HTTP，局域网 IP 访问必须走 HTTPS；错误提示要区分安全上下文、浏览器 API 缺失和用户权限拒绝
 - 用户停止录音后统一提交 ASR，转写完成后落成一条用户消息，再进入 AI 回复
-- 显示语音输入按钮、连接异常提示、待确认操作与执行反馈
+- 显示语音输入按钮、连接异常提示、draft_update 结构化确认卡片、catalog 候选选择、ASR 低置信提示与执行反馈
+- 前端不根据 AI 自然语言判断任务是否完整；只使用后端 `draft_update` / `ready_for_review` / `pending_confirmation_fields` / `catalog_candidates` 状态展示确认入口
+- WEIGHING / DISPENSING 确认卡片必须展示用户输入、系统 catalog 匹配、CAS/等级、任务字段、状态和确认/修改/取消按钮
+- 如果 `asr.needs_confirmation=true`，先提示“该任务包含语音识别修正内容，请确认”，确认识别内容不能直接等同于确认执行任务
 
 ### VisionView.vue
 - 显示工位有无瓶状态
@@ -96,7 +104,7 @@ frontend/
 - `barge_in`
 - `cancel`
 - `cancel_pending`
-- `confirm`（用户点击"确认执行"按钮，触发命令阶段）
+- `confirm`（用户确认结构化任务卡片；后端仍必须先规则校验）
 
 ### 后端→前端
 - `state.update`
@@ -106,6 +114,9 @@ frontend/
 - `chat.done`
 - `pending_intent`
 - `pending_cleared`
+- `draft_update`
+- `catalog_candidates`
+- `rule_checking`
 - `slot_filling`
 - `dialog_reply`（对话阶段 LLM 自然语言回复，不含执行意图）
 - `tts.chunk`
@@ -129,6 +140,8 @@ interface VoiceState {
   asrPartial: string
   messages: ChatMessage[]
   pendingIntent: PendingIntent | null
+  currentDraft: TaskDraft | null
+  draftStatus: 'COLLECTING' | 'NEEDS_FIELD_CONFIRMATION' | 'READY_FOR_REVIEW' | 'PROPOSAL_CREATED' | 'RULE_CHECKING' | 'COMMAND_SENT' | 'CANCELLED' | 'FAILED' | null
   isConnected: boolean
   micError: MicError | null
 }
@@ -148,6 +161,8 @@ interface VisionState {
 3. **反问信息必须突出显示**，方便用户快速补充
 4. **视觉结果必须清晰标识工位号和识别结果**
 5. **错误信息必须可读，不得只显示代码**
+6. **确认卡片必须结构化展示后端状态**，不得只靠 AI 自然语言提示执行关键操作
+7. **用户确认后显示规则校验中 / 已下发执行 / 规则失败**，不要再显示“等待审批”
 
 ---
 
@@ -159,3 +174,4 @@ interface VisionState {
 4. **音频处理统一在 `audio.ts` 封装**
 5. **前端只做展示与交互，不承载业务决策逻辑**
 6. **界面必须适配全屏浏览器运行**
+7. **禁止新增 UI / 图表 / 图标库**，除非先更新根目录和本文件规则并说明必要性
