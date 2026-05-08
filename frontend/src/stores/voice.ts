@@ -135,9 +135,15 @@ export const useVoiceStore = defineStore('voice', () => {
 
   function _appendBalanceSeriesPoint(value: number, timestamp?: string): void {
     const ts = _parseBalanceTimestamp(timestamp)
-    const minTs = ts - BALANCE_SERIES_WINDOW_MS
+    const bucketTs = Math.floor(ts / BALANCE_SERIES_FLUSH_MS) * BALANCE_SERIES_FLUSH_MS
+    const minTs = bucketTs - BALANCE_SERIES_WINDOW_MS
     const points = balanceSeriesPoints.value
-    points.push({ ts, value })
+    const lastPoint = points[points.length - 1]
+    if (lastPoint && lastPoint.ts === bucketTs) {
+      lastPoint.value = value
+    } else {
+      points.push({ ts: bucketTs, value })
+    }
     while (points.length > 0 && points[0].ts < minTs) points.shift()
     if (points.length > BALANCE_SERIES_MAX_POINTS) {
       points.splice(0, points.length - BALANCE_SERIES_MAX_POINTS)
