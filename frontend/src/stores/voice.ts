@@ -25,8 +25,8 @@ export interface BalanceSeriesPoint {
   value: number
 }
 
-const BALANCE_DISPLAY_FLUSH_MS = 100
-const BALANCE_SERIES_FLUSH_MS = 100
+const BALANCE_DISPLAY_FLUSH_MS = 300
+const BALANCE_SERIES_FLUSH_MS = 200
 const BALANCE_SERIES_WINDOW_MS = 10_000
 const BALANCE_SERIES_MAX_POINTS = 1_000
 
