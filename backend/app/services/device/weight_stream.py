@@ -37,7 +37,8 @@ async def _weight_stream_loop() -> None:
                     if value_mg is None:
                         continue
                     stable = bool(payload.get("stable", False))
-                    await push_balance(float(value_mg), stable)
+                    timestamp = payload.get("timestamp")
+                    await push_balance(float(value_mg), stable, timestamp if isinstance(timestamp, str) else None)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

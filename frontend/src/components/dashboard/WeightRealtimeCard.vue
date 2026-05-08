@@ -72,7 +72,6 @@ function scheduleRender() {
 }
 
 watch(() => props.pointsVersion, scheduleRender)
-watch(() => props.points, scheduleRender)
 
 onMounted(() => {
   renderChart()

@@ -1057,13 +1057,13 @@ async def _heartbeat_loop(client_id: str) -> None:
 
 # ─── 天平广播（由 balance 驱动层调用）────────────────────────────
 
-async def push_balance(mass_mg: float, stable: bool) -> None:
+async def push_balance(mass_mg: float, stable: bool, timestamp: str | None = None) -> None:
     await ws_manager.broadcast(
         {
             "type": "balance_reading",
             "value_mg": mass_mg,
             "stable": stable,
-            "timestamp": _now_iso(),
+            "timestamp": timestamp or _now_iso(),
         }
     )
 

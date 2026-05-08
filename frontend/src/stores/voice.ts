@@ -26,7 +26,9 @@ export interface BalanceSeriesPoint {
 }
 
 const BALANCE_DISPLAY_FLUSH_MS = 100
+const BALANCE_SERIES_FLUSH_MS = 100
 const BALANCE_SERIES_WINDOW_MS = 60_000
+const BALANCE_SERIES_MAX_POINTS = 1_500
 
 export const useVoiceStore = defineStore('voice', () => {
   const sessionState = ref<SessionState>('idle')
@@ -57,7 +59,9 @@ export const useVoiceStore = defineStore('voice', () => {
   const _player = new AudioPlayer()
   let _streamingId: string | null = null
   let _balanceFlushTimer: ReturnType<typeof setTimeout> | null = null
+  let _balanceSeriesFlushTimer: ReturnType<typeof setTimeout> | null = null
   let _balanceCooldownUntil = 0
+  let _balanceSeriesCooldownUntil = 0
 
   const isPlaying = computed(() => _player.isPlaying)
 
@@ -104,14 +108,41 @@ export const useVoiceStore = defineStore('voice', () => {
     return Number.isFinite(parsed) ? parsed : Date.now()
   }
 
+  function _publishBalanceSeries(): void {
+    triggerRef(balanceSeriesPoints)
+    balanceSeriesVersion.value += 1
+  }
+
+  function _scheduleBalanceSeriesFlush(): void {
+    const now = Date.now()
+    if (now >= _balanceSeriesCooldownUntil) {
+      _publishBalanceSeries()
+      _balanceSeriesCooldownUntil = now + BALANCE_SERIES_FLUSH_MS
+      if (_balanceSeriesFlushTimer) {
+        clearTimeout(_balanceSeriesFlushTimer)
+        _balanceSeriesFlushTimer = null
+      }
+      return
+    }
+
+    if (_balanceSeriesFlushTimer) return
+    _balanceSeriesFlushTimer = setTimeout(() => {
+      _balanceSeriesFlushTimer = null
+      _publishBalanceSeries()
+      _balanceSeriesCooldownUntil = Date.now() + BALANCE_SERIES_FLUSH_MS
+    }, Math.max(0, _balanceSeriesCooldownUntil - now))
+  }
+
   function _appendBalanceSeriesPoint(value: number, timestamp?: string): void {
     const ts = _parseBalanceTimestamp(timestamp)
     const minTs = ts - BALANCE_SERIES_WINDOW_MS
     const points = balanceSeriesPoints.value
     points.push({ ts, value })
     while (points.length > 0 && points[0].ts < minTs) points.shift()
-    triggerRef(balanceSeriesPoints)
-    balanceSeriesVersion.value += 1
+    if (points.length > BALANCE_SERIES_MAX_POINTS) {
+      points.splice(0, points.length - BALANCE_SERIES_MAX_POINTS)
+    }
+    _scheduleBalanceSeriesFlush()
   }
 
   const stateLabel = computed<string>(() => {
@@ -150,7 +181,12 @@ export const useVoiceStore = defineStore('voice', () => {
       clearTimeout(_balanceFlushTimer)
       _balanceFlushTimer = null
     }
+    if (_balanceSeriesFlushTimer) {
+      clearTimeout(_balanceSeriesFlushTimer)
+      _balanceSeriesFlushTimer = null
+    }
     _balanceCooldownUntil = 0
+    _balanceSeriesCooldownUntil = 0
   }
 
   function switchSession(sessionId: string): void {
