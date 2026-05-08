@@ -30,10 +30,13 @@
 
 ### 2.3 关键边界原则
 
-1. LLM 只输出**任务级 JSON**
-2. LLM 不直接生成底层运动控制指令
-3. 前端不直接控制设备
-4. 任务必须经过规则引擎、状态机与白名单校验
+1. AIExtractor 只输出本轮字段 patch，不判断任务完整性
+2. AI 不生成 command JSON，不直接生成底层运动控制指令
+3. AI 不能写 `chemical_id` 或 `slot_id` / `motor_id` / `pump_id` / `valve_id` / `station_id` 等控制层字段
+4. `chemical_id` 只能来自 catalog lookup 或用户候选选择
+5. 用户确认 = 本机自审批，但必须先通过后端规则校验
+6. 前端不直接控制设备
+7. 任务必须经过规则引擎、状态机与白名单校验
 
 ---
 
@@ -61,8 +64,8 @@
 │                         Jetson 主控：FastAPI 后端                           │
 │                                                                            │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │  AI 处理层：VAD → whisper.cpp(ASR) → llama.cpp server(LLM) → MeloTTS(TTS)  │ │
-│  │   intent_schema.json(LLM输出) → 规则引擎 → command_schema.json(下发) │ │
+│  │  AI 处理层：VAD → whisper.cpp(ASR) → ASR guard → llama.cpp server(LLM) → MeloTTS(TTS) │ │
+│  │   Intent Router → AIExtractor patch → DraftManager → Validator → Catalog lookup │ │
 │  └───────────────────────────────────────┬───────────────────────────────┘ │
 │                                          │                                 │
 │  ┌───────────────────────────────────────▼───────────────────────────────┐ │
@@ -98,17 +101,20 @@
 
 ## 5. 核心执行链路
 
-**语音/界面输入 → ASR/表单 → LLM 生成 intent_json → 规则引擎校验 → 状态机检查 → 生成 command JSON → C++ 后级控制程序 → 机械臂/下料电机执行 → 执行反馈 → 界面与语音反馈**
+**用户输入 → Intent Router → AIExtractor patch → DraftManager merge → Validator → ASR guard → Chemical Catalog lookup → 前端结构化确认卡片 → 用户确认 self-approved → 后端规则校验 → 状态机检查 → 生成 command JSON → C++ 后级控制程序 → 机械臂/下料电机执行 → 执行反馈 → 界面与语音反馈**
 
 天平数据流（并行，仅展示）：
 **天平 → RS422-USB → Jetson 后端（MT-SICS 驱动）→ mg 整数 → WebSocket 推前端实时展示**
 （称重闭环和停止时机由 C++ 控制程序自主决定，AI 层不干涉）
 
 说明：
-- LLM 输出 `intent_json`（格式见 `shared/intent_schema.json`），为语义层，不保证字段正确性
-- 规则引擎校验后生成 `command JSON`（格式见 `shared/command_schema.json`），为执行层，字段值来自数据库
+- AIExtractor 只输出字段 patch；后端 DraftManager 合并草稿，Validator 判断缺失字段和是否 `READY_FOR_REVIEW`
+- ASR guard 保留 `raw_text` / `normalized_text` / `confidence`，低置信关键字段必须先确认
+- Chemical Catalog lookup 负责确认真实化学品身份；`chemical_id` 不来自 AI
+- 用户确认卡片后，后端生成 proposal / intent JSON，并标记 `approval_mode=self_approved`
+- 规则引擎校验后生成 `command JSON`（格式见 `shared/command_schema.json`），为执行层，字段值来自数据库和已确认 catalog 数据
 - C++ 后级控制程序负责把 command JSON 映射为具体机械动作
-- 未通过规则校验的 intent_json 不得生成 command，更不得下发
+- 未通过规则校验的任务不得生成 command，更不得下发
 
 ---
 
@@ -135,11 +141,16 @@
 
 ## 7. 模块设计
 
-### 7.1 语音链路
+### 7.1 语音 / draft 链路
 - silero-vad：语音起止检测
 - whisper.cpp：中文离线识别
-- 本地 LLM（llama.cpp server，Qwen3-4B-Instruct-2507-Q4_K_M）：意图理解、槽位补全、生成 `intent_json`（格式见 `shared/intent_schema.json`）
-- 规则引擎：校验 intent_json，查库补全药品字段，生成 `command JSON`（格式见 `shared/command_schema.json`）
+- ASR guard：保留 raw / normalized / confidence，阻止低置信关键字段静默进入确认态
+- Intent Router：保守分流普通对话、查询、任务草稿、取消和确认
+- 本地 LLM（llama.cpp server，Qwen3-4B-Instruct-2507-Q4_K_M）：只做语言理解和字段 patch 提取
+- DraftManager：合并 session 级 draft、持久化、记录审计事件
+- Validator：判断 missing_slots、pending_confirmation_fields、READY_FOR_REVIEW
+- Chemical Catalog lookup：匹配真实化学品 ID、CAS、等级；多候选必须用户选择
+- 规则引擎：校验 proposal / intent、库存、设备状态和安全边界，生成 `command JSON`（格式见 `shared/command_schema.json`）
 - MeloTTS：语音反馈和反问播报
 
 ### 7.1.1 天平驱动链路（常驻）
@@ -213,7 +224,10 @@
 
 日志建议覆盖：
 - 语音识别结果
-- LLM 结构化输出
+- AIExtractor raw output、sanitized patch、applied patch
+- DraftManager audit events
+- ASR raw_text / normalized_text / confidence / needs_confirmation
+- Catalog lookup 候选和用户选择
 - 规则校验结果
 - 任务下发记录
 - 控制执行反馈
@@ -240,8 +254,8 @@
 ## 10. 关键设计原则
 
 1. **本地优先**：核心能力完全本地化
-2. **任务级输出**：AI 只生成任务，不直接生成底层动作
-3. **规则隔离**：执行前必须经过规则与状态机
+2. **AI 只填草稿**：AI 只提取 patch，不判断完整性，不生成 command，不写化学品 ID 或控制层字段
+3. **规则隔离**：用户确认是本机自审批，但执行前必须经过规则与状态机
 4. **控制隔离**：后级控制程序负责设备级动作
 5. **安全优先**：联锁、急停、异常处理优先于任务执行
 6. **可追溯**：全过程记录日志与反馈

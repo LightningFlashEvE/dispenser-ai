@@ -6,13 +6,13 @@
 
 **一句话定义：**
 
-**语音/界面输入 → ASR/表单 → LLM 生成任务级 JSON → 规则引擎校验 → 状态机检查 → 后级控制程序 → 机械臂/称重模块执行 → 结果反馈。**
+**用户输入 → Intent Router → AIExtractor patch → DraftManager → Validator / ASR guard / Catalog lookup → 结构化确认卡片 → 用户确认 self-approved → 后端规则校验 → command JSON → 后级控制程序 → 结果反馈。**
 
 ### 核心特性
 
 - **全本地离线**：ASR、LLM、TTS、视觉均在 Jetson 本地运行，不依赖云端
 - **语音交互**：USB 麦克风 + whisper.cpp 语音识别 + MeloTTS 语音播报
-- **AI 意图理解**：Qwen3-4B 大模型通过 llama.cpp 部署，理解自然语言配药指令
+- **AI 字段提取**：Qwen3-4B 大模型通过 llama.cpp 部署，只负责理解自然语言并提取 draft patch
 - **规则引擎校验**：所有任务经过规则引擎和状态机检查后才可执行
 - **MCP Server 工具集**：将系统能力封装为标准工具，AI 可按需调用
 - **工业触摸屏**：本地网页前端，支持触摸屏操作和局域网访问
@@ -88,7 +88,7 @@ cp .env.example .env
                                                ↓ CAN/RS485/串口/TCP
                                  [ 机械臂 / 称重模块 / 现场 IO ]
 
-[ USB 麦克风 ] → [ VAD + whisper.cpp ] → [ LLM ] → [ 规则引擎 + 状态机 ]
+[ USB 麦克风 ] → [ VAD + whisper.cpp ] → [ ASR guard ] → [ Intent Router + AIExtractor patch ] → [ Draft / Validator / Catalog ] → [ 规则引擎 + 状态机 ]
 [ 工业相机 ]   → [ 固定 ROI + QRCodeDetector ] → [ 工位/药品/坐标结果 ]
 [ MeloTTS ]    → [ 语音反馈 ]
 
@@ -102,11 +102,21 @@ cp .env.example .env
   ↓
 ASR（whisper.cpp）/ 表单输入
   ↓
-LLM（llama.cpp server）→ intent_json（见 shared/intent_schema.json）
+Intent Router（普通对话、查询、开始/更新/取消/确认任务）
   ↓
-规则引擎：校验 intent_json + 查药品库 → command JSON（见 shared/command_schema.json）
+AIExtractor patch（AI 只提取本轮字段，不判断完整性）
   ↓
-状态机检查
+DraftManager merge（后端合并 session 级 draft，记录审计事件）
+  ↓
+Validator + ASR guard + Chemical Catalog lookup
+  ↓
+前端结构化确认卡片
+  ↓
+用户确认 = self_approved
+  ↓
+后端规则校验 + 状态机检查
+  ↓
+build_command → command JSON（见 shared/command_schema.json）
   ↓
 C++ 后级控制程序（TCP + JSON）
   ↓
@@ -123,7 +133,8 @@ C++ 后级控制程序（TCP + JSON）
 
 #### Jetson 主控负责
 - 本地语音识别（ASR）
-- 本地大模型理解与任务级 JSON 生成
+- 本地大模型理解自然语言并提取 draft patch
+- DraftManager / Validator / ASR guard / Chemical Catalog lookup
 - 本地语音合成（TTS）
 - 固定工位视觉识别、二维码识别与坐标换算
 - 网页前后端服务
@@ -141,7 +152,11 @@ C++ 后级控制程序（TCP + JSON）
 - 执行结果状态反馈
 
 #### 边界原则
-- LLM **只输出任务级 JSON**，不直接生成底层运动控制指令
+- AI **只输出字段 patch**，不判断任务完整性，不生成 command，不写 `chemical_id` 或控制层字段
+- `chemical_id` 只能来自 catalog lookup 或用户候选选择
+- 用户确认 = 本机自审批，但必须先通过后端规则校验
+- 规则通过才 `build_command` / `send_command`，规则失败不下发
+- 重复确认不能重复下发
 - 前端不直接控制设备
 - 所有执行必须经过规则引擎、状态机和控制白名单约束
 - 天平直连 Jetson，不经过 C++ 控制程序
@@ -160,7 +175,7 @@ C++ 后级控制程序（TCP + JSON）
 | 语音合成 | MeloTTS | 本地离线 TTS |
 | 视觉检测 | 固定 ROI + QRCodeDetector | 基础视觉方案 |
 | 后端 | FastAPI | 本地 API 与页面服务 |
-| 前端 | HTML / Vue | 本地网页、触摸屏访问 |
+| 前端 | Vue 3 + Vite + TypeScript + Pinia | Tailwind + shadcn-vue 主视觉，ECharts 主图表库，Element Plus 仅用于复杂表格/表单/弹窗/分页 |
 | MCP Server | Python mcp SDK + stdio | AI 工具调用层 |
 | 数据存储 | SQLite + JSON | 轻量存储 |
 | 控制通信 | HTTP/JSON + TCP | 与后级控制程序对接 |
@@ -457,7 +472,7 @@ sudo systemctl status dispenser-ai
 - [ ] C++ 后级控制程序 → 确认 TCP 通信和命令下发正常
 - [ ] TTS → 确认语音播报正常
 
-> 完整的版本升级与验收流程（含 WS 协议变更、pending_intent 验证、性能基线）见 [docs/upgrade-v0.2.md](docs/upgrade-v0.2.md)。
+> 历史版本升级流程见 [docs/upgrade-v0.2.md](docs/upgrade-v0.2.md)。当前任务链路以 draft workflow、结构化确认卡片和 self-approved 规则校验为准。
 
 ---
 
@@ -484,12 +499,16 @@ MCP（Model Context Protocol）Server 将系统的核心能力封装为标准工
 
 ```
 用户: "我要配 500mg 氯化钠"
-AI: 调用 query_drug_stock("氯化钠") → 查到库存充足
-AI: "找到氯化钠了，在 3 号工位，库存 50g。确认执行吗？"
+后端: Intent Router 进入称量 draft，AIExtractor 只提取 chemical_name_text / target_mass / mass_unit
+后端: Catalog lookup 匹配真实化学品，Validator 判断还缺目标容器和用途
+AI: "请补充目标容器和本次任务用途。"
+用户: "放到 A1，做标准液"
+后端: DraftManager 合并 patch，Validator 进入 READY_FOR_REVIEW
+前端: 展示结构化确认卡片（用户输入、系统匹配、CAS/等级、质量、容器、用途）
 用户: "确认"
-AI: 调用 generate_intent("配500mg氯化钠") → 生成 intent JSON
-AI: 调用 build_command(intent_json) → 生成 command JSON
-AI: 调用 send_command(command_json) → 下发到控制层
+后端: 生成 proposal / intent，标记 approval_mode=self_approved
+后端: 规则校验通过后 build_command → command JSON
+后端: send_command → 下发到控制层
 AI: "已开始执行，预计 2 分钟完成"
 ```
 
@@ -606,9 +625,9 @@ dispenser-ai/
 │   │   ├── models/               # 数据库 ORM 模型
 │   │   ├── schemas/              # Pydantic Schema
 │   │   ├── services/             # 业务逻辑层
-│   │   │   ├── ai/               # AI 服务（LLM、ASR、TTS、对话、意图）
+│   │   │   ├── ai/               # AI 服务（LLM、ASR、TTS）
 │   │   │   ├── device/           # 设备驱动（天平 MT-SICS、控制客户端）
-│   │   │   ├── dialog/           # 对话系统（规则引擎、状态机、调度器）
+│   │   │   ├── dialog/           # 对话调度、draft workflow、规则引擎、状态机
 │   │   │   ├── inventory/        # 药品库存管理
 │   │   │   └── vision/           # 视觉检测服务
 │   │   └── main.py               # FastAPI 入口
@@ -631,7 +650,7 @@ dispenser-ai/
 │   ├── requirements.txt
 │   └── .env.example
 ├── shared/                       # Schema 契约文件
-│   ├── intent_schema.json        # LLM 意图输出格式（v1.0）
+│   ├── intent_schema.json        # 后端 proposal / intent 格式（v1.0）
 │   └── command_schema.json       # 后级控制指令格式（v2.1）
 ├── mock-qt/                      # 模拟 C++ 后级控制程序（开发联调用）
 ├── libs/                         # 共享库目录（llama.cpp / whisper.cpp 编译产物）
@@ -654,12 +673,12 @@ dispenser-ai/
 ## 关键设计原则
 
 1. **本地优先**：核心链路不依赖外网
-2. **任务级输出**：LLM 仅生成任务级 JSON，不直接生成底层运动控制指令
-3. **规则先行**：所有任务先过规则引擎和状态机，未通过校验一律拒绝执行
+2. **AI 只填草稿**：AI 只能提取 patch，不能判断完整性、不能写 `chemical_id`、不能生成 command
+3. **规则先行**：用户确认是本机自审批，但所有任务仍必须先过规则引擎和状态机
 4. **控制隔离**：后级控制程序负责把任务映射为设备动作，前端不直接控制设备
 5. **安全优先**：急停、联锁、异常停机优先级高于 AI 决策
 6. **可追溯**：日志、任务、异常和执行反馈全链路留痕
-7. **信息不足先反问**：槽位缺失时必须先向用户确认，不得直接执行
+7. **信息不足先反问**：Validator 判断缺失字段，前端基于 draft_update 展示结构化确认
 8. **Schema 校验**：所有外部输入必须经过 Schema 校验
 
 详见 [AGENTS.md](AGENTS.md) 中的绝对约束章节。

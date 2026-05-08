@@ -1,5 +1,7 @@
 # dispenser-ai v0.2 升级与验证手册
 
+> **历史文档说明**：本文记录 v0.1.x → v0.2.0 的旧升级路径，包含当时的 `pending_intent` / `确认执行` 验收口径。当前系统已演进为 draft workflow：AIExtractor 只输出 patch，DraftManager / Validator / ASR guard / Chemical Catalog lookup 负责状态和确认，用户确认 = self-approved，但仍必须通过后端规则校验后才 `build_command` / `send_command`。当前施工规则以根目录 `AGENTS.md`、`backend/AGENTS.md`、`frontend/AGENTS.md` 和 `docs/architecture.md` 为准。
+
 本次重构覆盖 AI 交互、语音链路、后端结构、Jetson 启动脚本与契约统一，存在破坏性变更（WebSocket 协议、`intent_type` 命名、配置项），升级时务必按本文档操作并完成验收清单。
 
 适用版本：`0.1.x` → `0.2.0`
