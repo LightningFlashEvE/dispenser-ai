@@ -142,13 +142,27 @@ def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:
         if mass_value_only:
             patch["target_mass"] = float(mass_value_only.group("value"))
 
-    vessel_match = re.search(r"(?:放到|放入|放|到|容器|工位)\s*(?P<vessel>[A-Za-z]\d+|\d+号?工位)", text)
+    # 优先匹配：放到/放入/到 + 容器标识
+    vessel_match = re.search(
+        r"(?:放到|放入|放|到|容器|工位)\s*(?P<vessel>(?:空瓶|试剂瓶|瓶子?)\d+|[A-Za-z]\d+|\d+号?工位)",
+        text
+    )
     if vessel_match:
-        patch["target_vessel"] = vessel_match.group("vessel").upper()
+        vessel = vessel_match.group("vessel")
+        # 只对英文字母容器标识大写化，保留中文格式
+        if re.match(r"^[A-Za-z]\d+$", vessel):
+            patch["target_vessel"] = vessel.upper()
+        else:
+            patch["target_vessel"] = vessel
     else:
-        simple_vessel = re.search(r"\b(?P<vessel>[A-Za-z]\d+)\b", text)
+        # 回退：直接匹配容器标识
+        simple_vessel = re.search(r"\b(?P<vessel>(?:空瓶|试剂瓶)\d+|[A-Za-z]\d+)\b", text)
         if simple_vessel:
-            patch["target_vessel"] = simple_vessel.group("vessel").upper()
+            vessel = simple_vessel.group("vessel")
+            if re.match(r"^[A-Za-z]\d+$", vessel):
+                patch["target_vessel"] = vessel.upper()
+            else:
+                patch["target_vessel"] = vessel
 
     chemical = _extract_chemical_name(text)
     if chemical:

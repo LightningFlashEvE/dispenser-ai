@@ -131,7 +131,7 @@ def _validate_command_basics(body: dict) -> str | None:
 
     valid_types = [
         "dispense", "aliquot", "mix", "formula",
-        "query_stock", "restock", "cancel", "emergency_stop", "device_status",
+        "restock", "cancel", "emergency_stop", "device_status",
     ]
     if body["command_type"] not in valid_types:
         raise ValueError(f"未知的 command_type：{body['command_type']}")
@@ -558,32 +558,6 @@ async def _execute_formula(command_id: str, payload: dict) -> None:
     })
 
 
-async def _execute_query_stock(command_id: str, payload: dict) -> None:
-    """模拟库存查询：直接返回假数据。"""
-    await asyncio.sleep(0.1)
-    reagent_code = payload.get("reagent_code") or payload.get("reagent_name_cn") or "UNKNOWN"
-    result_payload = {
-        "reagent_code": reagent_code,
-        "stock_mg": random.randint(10000, 500000),
-        "note": "模拟数据，非真实库存",
-    }
-    _record_task(
-        command_id,
-        status="completed",
-        completed_at=now_iso(),
-        result=result_payload,
-        error=None,
-        steps=[],
-    )
-    await _do_callback({
-        "command_id": command_id,
-        "status": "completed",
-        "completed_at": now_iso(),
-        "result": result_payload,
-        "error": None,
-    })
-
-
 async def _run_task(command_id: str, command_type: str, payload: dict) -> None:
     """后台任务入口，执行完成后清理状态。"""
     try:
@@ -605,8 +579,6 @@ async def _run_task(command_id: str, command_type: str, payload: dict) -> None:
             await _execute_mix(command_id, payload)
         elif command_type == "formula":
             await _execute_formula(command_id, payload)
-        elif command_type == "query_stock":
-            await _execute_query_stock(command_id, payload)
         elif command_type in ("restock", "device_status"):
             # 简单延迟后回调成功
             await asyncio.sleep(CFG["execution_delay_ms"] / 1000.0)
@@ -777,7 +749,7 @@ async def receive_command(request: Request) -> JSONResponse:
         })
 
     # --- 设备忙检查（emergency_stop/cancel/query 类不受此限制）---
-    non_blocking_types = {"query_stock", "device_status"}
+    non_blocking_types = {"device_status"}
     if (
         _device_state["status"] == "executing"
         and command_type not in non_blocking_types
