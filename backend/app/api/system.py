@@ -1,3 +1,5 @@
+import asyncio
+import platform
 import shutil
 import subprocess
 
@@ -9,6 +11,10 @@ router = APIRouter(prefix="/api/system", tags=["系统资源"])
 
 @router.get("/resources")
 async def system_resources() -> dict:
+    return await asyncio.to_thread(_collect_system_resources)
+
+
+def _collect_system_resources() -> dict:
     cpu_percent = psutil.cpu_percent(interval=0.1)
     cpu_count = psutil.cpu_count()
 
@@ -49,12 +55,15 @@ async def system_resources() -> dict:
 
 def _get_jetson_gpu_usage() -> float:
     """通过 tegrastats 获取 Jetson GPU 使用率"""
+    if platform.system() != "Linux" or shutil.which("tegrastats") is None:
+        return 0.0
+
     try:
         result = subprocess.run(
-            ["timeout", "2", "tegrastats"],
+            ["tegrastats", "--interval", "1000", "--count", "1"],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=2,
         )
         lines = result.stdout.strip().split("\n")
         if not lines:
