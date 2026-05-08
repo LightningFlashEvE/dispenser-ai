@@ -10,7 +10,7 @@ interface WeightPoint {
 }
 
 const DEFAULT_WINDOW_MS = 10_000
-const AXIS_REFRESH_MS = 500
+const AXIS_REFRESH_MS = 100
 const AXIS_TICK_MS = 500
 
 const props = defineProps<{
