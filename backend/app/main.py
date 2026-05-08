@@ -22,32 +22,16 @@ from app.core.database import init_db
 from app.core.logging import setup_logging, get_logger
 
 logger = get_logger(__name__)
+_tts_warmup_task: asyncio.Task | None = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    setup_logging()
-    logger.info(f"dispenser-ai 后端启动，环境：{settings.env}")
-    await init_db()
-    logger.info("数据库初始化完成")
-
-    # 预热 intent schema validator（启动时暴露 schema 文件缺失问题）
-    try:
-        from app.services.dialog.intent import get_intent_validator
-
-        get_intent_validator()
-        logger.info("intent_schema.json 加载成功（Draft-07）")
-    except Exception as e:  # noqa: BLE001
-        logger.error("intent_schema.json 加载失败: %s（服务继续，但 Schema 校验将降级）", e)
-
-    # 预热 TTS（避免首次用户请求时模型冷启动导致延迟）
+async def _warmup_tts_background() -> None:
+    """Warm up TTS without blocking FastAPI startup health checks."""
     try:
         from app.services.ai.tts import get_tts_client
 
         tts = get_tts_client()
-        # 先用健康检查确认服务可达
         await tts.health()
-        # 用有意义的中文短文本预热模型（MeloTTS 对空文本返回 400）
         for attempt_idx, warmup_text in enumerate([
             "配药助手已就绪",
             "配药小助手启动完成",
@@ -63,8 +47,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.warning("TTS 预热返回空结果，继续重试")
             except asyncio.TimeoutError:
                 logger.warning("TTS 预热超时（尝试 %d）", attempt_idx + 1)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:  # noqa: BLE001
         logger.warning("TTS 预热失败（服务继续）: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    global _tts_warmup_task
+
+    setup_logging()
+    logger.info(f"dispenser-ai 后端启动，环境：{settings.env}")
+    await init_db()
+    logger.info("数据库初始化完成")
+
+    # 预热 intent schema validator（启动时暴露 schema 文件缺失问题）
+    try:
+        from app.services.dialog.intent import get_intent_validator
+
+        get_intent_validator()
+        logger.info("intent_schema.json 加载成功（Draft-07）")
+    except Exception as e:  # noqa: BLE001
+        logger.error("intent_schema.json 加载失败: %s（服务继续，但 Schema 校验将降级）", e)
+
+    # 预热 TTS（避免首次用户请求时模型冷启动导致延迟），但不能阻塞 /health 就绪。
+    _tts_warmup_task = asyncio.create_task(_warmup_tts_background())
+    logger.info("TTS 后台预热已启动")
 
     try:
         from app.services.device.weight_stream import start_weight_stream
@@ -79,6 +88,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.ai.llm import get_llm
     from app.services.device.control_client import get_control_client
     from app.services.device.weight_stream import stop_weight_stream
+
+    if _tts_warmup_task is not None:
+        _tts_warmup_task.cancel()
+        try:
+            await _tts_warmup_task
+        except asyncio.CancelledError:
+            pass
+        _tts_warmup_task = None
 
     try:
         await stop_weight_stream()

@@ -205,9 +205,15 @@ info "[5/7] backend (FastAPI :8000)"
 PID_FILE_BE=".backend.pid"
 if is_port_listening 8000 && curl -ksf "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
     ok "backend 已在监听 :8000（运行中）"
-elif [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null; then
-    ok "backend 已在运行 (PID: $(cat "${PID_FILE_BE}"))"
+elif [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null && is_port_listening 8000; then
+    BACKEND_PID="$(cat "${PID_FILE_BE}")"
+    ok "backend 进程已在运行 (PID: ${BACKEND_PID})"
+    wait_for_url "http://127.0.0.1:8000/health" "backend" 60 || warn "backend 进程存在但健康检查未通过，请查看 logs/backend.log"
 else
+    if [ -f "${PID_FILE_BE}" ] && kill -0 "$(cat "${PID_FILE_BE}")" 2>/dev/null && ! is_port_listening 8000; then
+        warn "backend PID 文件指向运行中进程但 :8000 未监听，清理旧 PID: $(cat "${PID_FILE_BE}")"
+        rm -f "${PID_FILE_BE}"
+    fi
     BACKEND_UVICORN="${SCRIPT_DIR}/backend/venv/bin/uvicorn"
     if [ ! -x "${BACKEND_UVICORN}" ]; then
         err "backend venv 不存在，请先运行: ./scripts/setup-nx.sh"
@@ -224,7 +230,7 @@ else
         ) > "${PID_FILE_BE}"
         BACKEND_PID=$(cat "${PID_FILE_BE}")
         ok "backend 已启动 (PID: ${BACKEND_PID})"
-        wait_for_url "http://127.0.0.1:8000/health" "backend" 20 || err "backend 健康检查超时，请查看 logs/backend.log"
+        wait_for_url "http://127.0.0.1:8000/health" "backend" 60 || err "backend 健康检查超时，请查看 logs/backend.log"
     fi
 fi
 
