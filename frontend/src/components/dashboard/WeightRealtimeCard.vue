@@ -9,6 +9,10 @@ interface WeightPoint {
   value: number
 }
 
+const DEFAULT_WINDOW_MS = 10_000
+const AXIS_REFRESH_MS = 500
+const AXIS_TICK_MS = 500
+
 const props = defineProps<{
   valueMg: number | null
   stable: boolean
@@ -37,7 +41,7 @@ function formatWeightMg(value: number | null): string {
 function renderChart() {
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
-  const chartWindowMs = props.windowMs ?? 10_000
+  const chartWindowMs = props.windowMs ?? DEFAULT_WINDOW_MS
   const now = Date.now()
   const minTs = now - chartWindowMs
   const maxTs = now
@@ -55,6 +59,7 @@ function renderChart() {
       type: 'time',
       min: minTs,
       max: maxTs,
+      interval: AXIS_TICK_MS,
       axisLabel: { color: '#94a3b8', fontSize: 10 },
       axisLine: { lineStyle: { color: '#243244' } },
     },
@@ -84,7 +89,7 @@ watch(() => props.pointsVersion, scheduleRender)
 
 onMounted(() => {
   renderChart()
-  axisTimer = setInterval(scheduleRender, 1000)
+  axisTimer = setInterval(scheduleRender, AXIS_REFRESH_MS)
   window.addEventListener('resize', scheduleRender)
 })
 onBeforeUnmount(() => {
