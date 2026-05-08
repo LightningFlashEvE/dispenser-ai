@@ -87,6 +87,17 @@ C++ 控制层（只执行后端签发的 command JSON）
 （称重闭环由 C++ 自主决定，AI 层不干涉）
 ```
 
+## 通信与实时数据边界
+
+后续施工必须按数据性质选择通道，避免把查询、采样和执行语义混在 WebSocket 里：
+
+- **称重实时曲线**：WebSocket 可高频推送，但只用于前端显示；前端必须分离采集频率、数字显示频率和图表渲染频率，控制层判断不依赖前端曲线。
+- **Dashboard 系统资源**：后端后台 sampler 采集并缓存，HTTP 接口只读取 cache；不得在 `async` API 里直接执行阻塞采样、`subprocess.run()` 或长 `psutil` 调用来阻塞 event loop。
+- **任务确认 / 执行**：后端状态机 + 规则校验 + `command_id` 是唯一执行链路；WebSocket 只展示 draft、规则校验、command 下发和执行进度，不承担执行授权之外的安全保证。
+- **历史任务 / 日志 / 审计**：HTTP 分页查询；WebSocket 最多推新增或状态变更通知，不传全量历史。
+- **库存 / 配方 / 药品库**：HTTP 查询和修改；WebSocket 只推变更通知或提示前端刷新。
+- **急停 / 安全联锁**：控制层硬件优先，后端只显示状态和记录事件；不得依赖前端 WebSocket 作为安全链路。
+
 ## Draft 对话任务模式
 
 系统采用 **draft workflow**，把“语言理解”和“任务完整性 / 执行判断”分开：
@@ -262,7 +273,9 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 
 ### 前端 ↔ 后端
 - `HTTP/REST + WebSocket`
-- WebSocket 实时推送：天平读数、任务状态、语音转写、设备状态
+- WebSocket 实时推送：天平读数、语音转写、draft/task 状态变更、command 进度通知
+- HTTP/REST 查询和修改：系统资源 cache、历史任务、日志审计、库存、配方、药品库、设备状态快照
+- 系统资源接口必须读取后台 sampler cache，不能在请求处理中阻塞 event loop
 - WebSocket 音频消息：
   - 前端发送：二进制 PCM 音频帧 + `audio.commit`
   - 兼容旧协议：`audio_chunk`（base64 PCM）、`audio_end`

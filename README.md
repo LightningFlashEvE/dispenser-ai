@@ -16,7 +16,8 @@
 - **规则引擎校验**：所有任务经过规则引擎和状态机检查后才可执行
 - **MCP Server 工具集**：将系统能力封装为标准工具，AI 可按需调用
 - **工业触摸屏**：本地网页前端，支持触摸屏操作和局域网访问
-- **实时天平推送**：MT-SICS 协议读取天平数据，WebSocket 实时推送前端
+- **实时天平推送**：MT-SICS 协议读取天平数据，WebSocket 高频推送前端显示
+- **资源监控不阻塞**：Dashboard 系统资源由后端后台 sampler + cache 提供，HTTP 只读缓存
 - **视觉工位检测**：固定 ROI + 二维码识别，自动识别工位药品和位置
 
 ---
@@ -129,6 +130,15 @@ C++ 后级控制程序（TCP + JSON）
 （称重闭环由 C++ 自主决定，AI 层不干涉）
 ```
 
+### 通信与实时数据边界
+
+- **称重实时曲线**：WebSocket 高频推送，只用于显示；前端分离数据接收、数字显示和图表渲染频率。
+- **Dashboard 系统资源**：后台 sampler + cache；HTTP 读取，不在请求里阻塞 event loop。
+- **任务确认 / 执行**：后端状态机 + 规则校验 + `command_id`；WebSocket 只显示 draft、校验和执行进度。
+- **历史任务 / 日志 / 审计**：HTTP 分页查询。
+- **库存 / 配方 / 药品库**：HTTP 查询和修改；WebSocket 只推变更通知。
+- **急停 / 安全联锁**：控制层硬件优先，后端和前端只显示状态、记录事件和提供入口。
+
 ### 系统边界
 
 #### Jetson 主控负责
@@ -160,6 +170,7 @@ C++ 后级控制程序（TCP + JSON）
 - 前端不直接控制设备
 - 所有执行必须经过规则引擎、状态机和控制白名单约束
 - 天平直连 Jetson，不经过 C++ 控制程序
+- 急停和安全联锁不依赖前端 WebSocket 保证安全
 
 详见 [docs/architecture.md](docs/architecture.md)
 
@@ -552,7 +563,9 @@ cp .env.example .env
 
 ### 前端 ↔ 后端
 - `HTTP/REST + WebSocket`
-- WebSocket 实时推送：天平读数、任务状态、语音转写、设备状态
+- WebSocket 实时推送：天平读数、语音转写、draft/task 状态变更、command 进度通知
+- HTTP 查询/修改：系统资源 cache、设备状态快照、历史任务、日志审计、库存、配方、药品库
+- 系统资源接口必须读取后台 sampler cache，不得阻塞 FastAPI event loop
 
 ### 后端 ↔ whisper-server（ASR HTTP 服务）
 - 地址：`http://127.0.0.1:8081`

@@ -10,7 +10,7 @@
 
 1. 语音链路：VAD → ASR(whisper.cpp) → ASR guard → Intent Router → AIExtractor patch → DraftManager → Validator → catalog lookup → 结构化确认 → 规则引擎 → command JSON → TTS(MeloTTS)
 2. 视觉链路：固定 ROI 检测 → 二维码识别 → 坐标换算
-3. 天平驱动：MT-SICS over RS422-USB，读取重量 → mg 整数 → WebSocket 推前端 + 执行监控
+3. 天平驱动：MT-SICS over RS422-USB，读取重量 → mg 整数 → WebSocket 推前端显示
 4. 控制适配层：proposal / intent 校验（`shared/intent_schema.json`）、规则引擎、状态机、command JSON 生成（`shared/command_schema.json`）、TCP 通信
 5. 数据管理：药品（含多语言名称/别名/摩尔质量）、配方、工位、任务、日志、异常
 6. 与 C++ 后级控制程序通过 **TCP + JSON** 通信（不是 localhost HTTP，是 TCP）
@@ -47,6 +47,9 @@
 10. 后端天平驱动只负责读数，不直接控制下料电机（下料由 C++ 控制）。
 11. 后端不直接进行设备级动作控制（机械臂/电机/IO 联锁均由 C++ 负责）。
 12. C++ 后级控制程序负责机械臂、下料电机、IO 联锁与急停逻辑。
+13. WebSocket 可高频推送天平读数，但只用于显示；任务执行仍以后端状态机、规则校验、`command_id` 和 C++ 回调为准。
+14. 系统资源、历史任务、日志、审计、库存、配方和药品库走 HTTP 查询/修改；WebSocket 只推状态变化通知。
+15. Dashboard 系统资源必须采用后台 sampler + cache；HTTP handler 只读缓存，不得直接阻塞 event loop。
 
 ---
 
@@ -108,8 +111,8 @@ send_command() → C++ 后级控制程序
   ↓
 执行回调 → 日志落库 + WebSocket 推前端
 
-天平（并行常驻）：
-pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
+天平（并行常驻，仅展示）：
+pyserial → MT-SICS → mg整数 → WebSocket推前端显示
 ```
 
 - 普通聊天、库存查询、设备状态查询、配方查询属于只读/对话 route，不进入执行。
@@ -117,6 +120,19 @@ pyserial → MT-SICS → mg整数 → WebSocket推前端 + 执行期监控
 - Formula 查询只读；Formula 选择生成 proposal，用户确认后也必须过规则校验才能执行。
 - 前端录音开始前必须先确认 WebSocket 已连接；若连接断开，直接提示并取消本次录音，避免无效音频提交。
 - **必须**通过规则引擎和状态机检查后才能执行。
+
+## HTTP / WebSocket 职责划分
+
+| 数据类型 | 主通道 | 后端要求 |
+|----------|--------|----------|
+| 称重实时曲线 | WebSocket | 可以高频推送；消息要携带采样时间戳；只用于显示，不作为安全闭环依据 |
+| Dashboard 系统资源 | HTTP | 读取后台 sampler cache；采样逻辑不得阻塞 event loop |
+| 任务确认 / 执行进度 | 后端状态机 + WebSocket 通知 | 用户确认后必须先规则校验；通过后生成 `command_id` 并下发；重复确认幂等 |
+| 历史任务 / 日志 / 审计 | HTTP 分页 | WebSocket 只推新增/变更通知，不传全量历史 |
+| 库存 / 配方 / 药品库 | HTTP 查询和修改 | 修改后可 WebSocket 通知前端刷新 |
+| 急停 / 安全联锁 | C++ / 硬件优先 | 后端只显示和记录状态；不得依赖前端 WebSocket 保证安全 |
+
+任何 `async def` API 中不得直接执行阻塞采样、`subprocess.run()`、长时间 `psutil` 调用或同步 I/O。确需同步库时，必须放入后台任务、线程池或缓存层。
 
 ---
 
