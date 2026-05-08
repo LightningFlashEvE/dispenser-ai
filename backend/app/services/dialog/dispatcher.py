@@ -34,11 +34,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import Integer as SAInteger, cast, select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.reagent_bottle import ReagentBottle
 from app.models.task import Task
 from app.services.ai.llm import DialogResult, IntentResult, LLMService
 from app.services.dialog.intent import INTENT_TYPES_NO_SLOTS, validate_intent
@@ -786,6 +787,66 @@ class IntentDispatcher:
             state="FEEDBACK", pending_payload="clear", output_type="execute_now",
         )
 
+    async def handle_query_bottles(
+        self, session: Session, keyword: str | None
+    ) -> DispatchResult:
+        status_filter = _normalize_bottle_status_filter(keyword)
+
+        async with AsyncSessionLocal() as db:
+            stmt = select(ReagentBottle).where(ReagentBottle.is_active == True)  # noqa: E712
+            if status_filter:
+                stmt = stmt.where(ReagentBottle.status == status_filter)
+            stmt = stmt.order_by(cast(ReagentBottle.bottle_id, SAInteger))
+            result = await db.execute(stmt)
+            bottles = list(result.scalars().all())
+
+        session.reset()
+
+        status_label = _bottle_status_label(status_filter) if status_filter else "试剂瓶"
+        if not bottles:
+            text = f"当前没有{status_label}记录。"
+            return DispatchResult(
+                dialog_text=text,
+                speak_text=text,
+                state="FEEDBACK",
+                pending_payload="clear",
+                output_type="reply",
+                debug={"bottles": []},
+            )
+
+        lines = []
+        for bottle in bottles[:20]:
+            station = bottle.station_id or "未放置"
+            volume = f"{bottle.volume_ml:g} mL" if bottle.volume_ml is not None else "容量未知"
+            lines.append(
+                f"  - {bottle.label}（编号 {bottle.bottle_id}，{station}，{volume}，"
+                f"{_bottle_status_label(bottle.status)}）"
+            )
+
+        suffix = "" if len(bottles) <= 20 else f"\n已显示前 20 个，共 {len(bottles)} 个。"
+        full_text = f"当前共有 {len(bottles)} 个{status_label}：\n" + "\n".join(lines) + suffix
+        summary = f"当前共有 {len(bottles)} 个{status_label}，详情已显示在屏幕上。"
+
+        return DispatchResult(
+            dialog_text=full_text,
+            speak_text=summary,
+            state="FEEDBACK",
+            pending_payload="clear",
+            output_type="execute_now",
+            debug={
+                "bottles": [
+                    {
+                        "bottle_id": b.bottle_id,
+                        "label": b.label,
+                        "status": b.status,
+                        "station_id": b.station_id,
+                        "volume_ml": b.volume_ml,
+                    }
+                    for b in bottles
+                ],
+            },
+        )
+
     async def handle_query_formula(
         self, session: Session, keyword: str | None
     ) -> DispatchResult:
@@ -1206,6 +1267,34 @@ def _normalize_stock_keyword(text: str | None) -> str | None:
         return None
 
     return cleaned
+
+
+def _normalize_bottle_status_filter(text: str | None) -> str | None:
+    if not text:
+        return None
+
+    compact = re.sub(r"[\s，。！？,.!?]", "", text.strip())
+    if re.search(r"(空闲|空瓶|空的|备用|未装|empty)", compact, re.I):
+        return "empty"
+    if re.search(r"(已装填|装填|已装|有药|filled)", compact, re.I):
+        return "filled"
+    if re.search(r"(使用中|占用|inuse|in_use)", compact, re.I):
+        return "in_use"
+    if re.search(r"(已用尽|用尽|耗尽|depleted)", compact, re.I):
+        return "depleted"
+    if re.search(r"(清洗|cleaning)", compact, re.I):
+        return "cleaning"
+    return None
+
+
+def _bottle_status_label(status: str | None) -> str:
+    return {
+        "empty": "空瓶",
+        "filled": "已装填试剂瓶",
+        "in_use": "使用中试剂瓶",
+        "depleted": "已用尽试剂瓶",
+        "cleaning": "清洗中试剂瓶",
+    }.get(status or "", "试剂瓶")
 
 
 def _normalize_formula_keyword(text: str | None) -> str | None:

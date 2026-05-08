@@ -24,6 +24,18 @@ def test_router_detects_weighing_start():
     assert result.task_type == TaskType.WEIGHING
 
 
+def test_router_detects_empty_reagent_bottle_query_before_inventory():
+    result = route_intent("查询试空闲试剂瓶")
+
+    assert result.route == "query_bottles"
+
+
+def test_router_detects_reagent_bottle_management_query():
+    result = route_intent("查看试剂瓶管理列表")
+
+    assert result.route == "query_bottles"
+
+
 def test_router_confirms_asr_fields_before_proposal():
     manager = DraftManager()
     draft = manager.apply_patch(

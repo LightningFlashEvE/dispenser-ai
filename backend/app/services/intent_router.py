@@ -10,6 +10,7 @@ from app.schemas.task_draft_schema import TaskDraftRecord, TaskType
 Route = Literal[
     "normal_chat",
     "query_inventory",
+    "query_bottles",
     "query_formula",
     "select_formula",
     "select_catalog_candidate",
@@ -55,6 +56,9 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
 
     if _is_formula_selection(text):
         return RouteResult(route="select_formula")
+
+    if _is_bottle_query(text):
+        return RouteResult(route="query_bottles", query_keyword=text)
 
     if active_draft and _needs_catalog_candidate(active_draft) and _is_catalog_selection(text):
         return RouteResult(route="select_catalog_candidate", task_type=active_draft.task_type)
@@ -130,6 +134,13 @@ def _is_formula_query(text: str) -> bool:
 
 def _is_formula_selection(text: str) -> bool:
     return "配方" in text and _contains_any(text, FORMULA_SELECT_WORDS)
+
+
+def _is_bottle_query(text: str) -> bool:
+    return bool(
+        re.search(r"(试剂瓶|空瓶|瓶子|瓶列表|瓶管理)", text)
+        and re.search(r"(查询|查一下|查查|查看|看看|看下|帮我查|有没有|空闲|空瓶|列表|管理)", text)
+    )
 
 
 def _needs_catalog_candidate(active_draft: TaskDraftRecord) -> bool:

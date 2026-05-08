@@ -538,6 +538,11 @@ async def _process_text_input(
         await _apply_dispatch_result(client_id, result)
         return
 
+    if route.route == "query_bottles":
+        result = await dispatcher.handle_query_bottles(session, route.query_keyword or user_text)
+        await _apply_dispatch_result(client_id, result)
+        return
+
     if route.route == "query_formula":
         result = await dispatcher.handle_query_formula(session, user_text)
         await _apply_dispatch_result(client_id, result)
