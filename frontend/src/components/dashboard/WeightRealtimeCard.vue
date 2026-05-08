@@ -4,15 +4,21 @@ import * as echarts from 'echarts'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Card from '@/components/ui/card/Card.vue'
 
+interface WeightPoint {
+  ts: number
+  value: number
+}
+
 const props = defineProps<{
   valueMg: number | null
   stable: boolean
   overLimit: boolean
+  points?: WeightPoint[]
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
-const points = ref<Array<{ time: string; value: number }>>([])
 let chart: echarts.ECharts | null = null
+let rafId: number | null = null
 
 const status = computed(() => {
   if (props.overLimit) return { text: '异常', variant: 'danger' as const }
@@ -25,36 +31,54 @@ function formatWeightMg(value: number | null): string {
   return Math.abs(value) < 10 ? value.toFixed(3) : value.toFixed(0)
 }
 
-function formatPointTime(date: Date): string {
-  const base = date.toLocaleTimeString('zh-CN', { hour12: false, minute: '2-digit', second: '2-digit' })
-  return `${base}.${Math.floor(date.getMilliseconds() / 100)}`
-}
-
 function renderChart() {
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
+  const seriesPoints = props.points ?? []
   chart.setOption({
     grid: { left: 8, right: 8, top: 10, bottom: 18, containLabel: true },
-    xAxis: { type: 'category', data: points.value.map((p) => p.time), axisLabel: { color: '#94a3b8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243244' } } },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) => {
+        const numericValue = Array.isArray(value) ? Number(value[1]) : Number(value)
+        return Number.isFinite(numericValue) ? `${numericValue.toFixed(3)} mg` : '--'
+      },
+    },
+    xAxis: {
+      type: 'time',
+      axisLabel: { color: '#94a3b8', fontSize: 10 },
+      axisLine: { lineStyle: { color: '#243244' } },
+    },
     yAxis: { type: 'value', axisLabel: { color: '#94a3b8', fontSize: 10 }, splitLine: { lineStyle: { color: '#1f2a3a' } } },
-    series: [{ type: 'line', data: points.value.map((p) => p.value), smooth: true, showSymbol: false, lineStyle: { color: '#06b6d4', width: 2 }, areaStyle: { color: 'rgba(6, 182, 212, 0.12)' } }],
+    series: [{
+      type: 'line',
+      data: seriesPoints.map((point) => [point.ts, point.value]),
+      smooth: false,
+      showSymbol: false,
+      lineStyle: { color: '#06b6d4', width: 2 },
+      areaStyle: { color: 'rgba(6, 182, 212, 0.12)' },
+    }],
     animation: false,
   })
 }
 
-watch(() => props.valueMg, (value) => {
-  if (value === null || value === undefined) return
-  points.value.push({ time: formatPointTime(new Date()), value })
-  points.value = points.value.slice(-300)
-  renderChart()
-})
+function scheduleRender() {
+  if (rafId !== null) return
+  rafId = requestAnimationFrame(() => {
+    rafId = null
+    renderChart()
+  })
+}
+
+watch(() => props.points, scheduleRender, { deep: true })
 
 onMounted(() => {
   renderChart()
-  window.addEventListener('resize', renderChart)
+  window.addEventListener('resize', scheduleRender)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', renderChart)
+  window.removeEventListener('resize', scheduleRender)
+  if (rafId !== null) cancelAnimationFrame(rafId)
   chart?.dispose()
 })
 </script>

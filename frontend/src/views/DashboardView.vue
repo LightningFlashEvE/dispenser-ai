@@ -231,7 +231,12 @@ onUnmounted(() => {
 
       <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <TaskProgressCard :task="currentTask" :state-label="voiceStore.stateLabel" :can-cancel="voiceStore.isConnected && Boolean(currentTask)" @cancel="cancelCurrentTask" />
-        <WeightRealtimeCard :value-mg="displayWeightMg" :stable="displayWeightStable" :over-limit="displayWeightOverLimit" />
+        <WeightRealtimeCard
+          :value-mg="displayWeightMg"
+          :stable="displayWeightStable"
+          :over-limit="displayWeightOverLimit"
+          :points="voiceStore.balanceSeriesPoints"
+        />
       </section>
 
       <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_420px]">

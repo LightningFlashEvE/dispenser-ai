@@ -79,6 +79,7 @@ onUnmounted(() => {
         :value-mg="displayWeightMg"
         :stable="displayWeightStable"
         :over-limit="displayWeightOverLimit"
+        :points="voiceStore.balanceSeriesPoints"
       />
       <Card class="p-4">
         <div class="mb-4 flex items-center gap-2">

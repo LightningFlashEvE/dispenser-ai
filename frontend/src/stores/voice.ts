@@ -20,6 +20,14 @@ export interface ChatMessage {
   asrMeta?: AsrMeta
 }
 
+export interface BalanceSeriesPoint {
+  ts: number
+  value: number
+}
+
+const BALANCE_DISPLAY_FLUSH_MS = 100
+const BALANCE_SERIES_WINDOW_MS = 60_000
+
 export const useVoiceStore = defineStore('voice', () => {
   const sessionState = ref<SessionState>('idle')
   const messages = ref<ChatMessage[]>([])
@@ -35,6 +43,7 @@ export const useVoiceStore = defineStore('voice', () => {
   const balanceLatestMg = ref<number | null>(null)
   const balanceLatestStable = ref(false)
   const balanceLatestOverLimit = ref(false)
+  const balanceSeriesPoints = ref<BalanceSeriesPoint[]>([])
   const audioInited = ref(false)
   const audioError = ref<string | null>(null)
   const micError = ref<MicError | null>(null)
@@ -61,7 +70,7 @@ export const useVoiceStore = defineStore('voice', () => {
     const now = Date.now()
     if (now >= _balanceCooldownUntil) {
       _flushBalanceDisplay()
-      _balanceCooldownUntil = now + 500
+      _balanceCooldownUntil = now + BALANCE_DISPLAY_FLUSH_MS
       if (_balanceFlushTimer) {
         clearTimeout(_balanceFlushTimer)
         _balanceFlushTimer = null
@@ -74,9 +83,9 @@ export const useVoiceStore = defineStore('voice', () => {
           balanceOverLimit.value !== balanceLatestOverLimit.value
         ) {
           _flushBalanceDisplay()
-          _balanceCooldownUntil = Date.now() + 500
+          _balanceCooldownUntil = Date.now() + BALANCE_DISPLAY_FLUSH_MS
         }
-      }, 500)
+      }, BALANCE_DISPLAY_FLUSH_MS)
       return
     }
 
@@ -84,8 +93,23 @@ export const useVoiceStore = defineStore('voice', () => {
     _balanceFlushTimer = setTimeout(() => {
       _balanceFlushTimer = null
       _flushBalanceDisplay()
-      _balanceCooldownUntil = Date.now() + 500
+      _balanceCooldownUntil = Date.now() + BALANCE_DISPLAY_FLUSH_MS
     }, Math.max(0, _balanceCooldownUntil - now))
+  }
+
+  function _parseBalanceTimestamp(timestamp?: string): number {
+    if (!timestamp) return Date.now()
+    const parsed = Date.parse(timestamp)
+    return Number.isFinite(parsed) ? parsed : Date.now()
+  }
+
+  function _appendBalanceSeriesPoint(value: number, timestamp?: string): void {
+    const ts = _parseBalanceTimestamp(timestamp)
+    const minTs = ts - BALANCE_SERIES_WINDOW_MS
+    balanceSeriesPoints.value = [
+      ...balanceSeriesPoints.value.filter((point) => point.ts >= minTs),
+      { ts, value },
+    ]
   }
 
   const stateLabel = computed<string>(() => {
@@ -232,12 +256,14 @@ export const useVoiceStore = defineStore('voice', () => {
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = msg.stable
         balanceLatestOverLimit.value = false
+        _appendBalanceSeriesPoint(msg.value_mg, msg.timestamp)
         _scheduleBalanceFlush()
         break
       case 'balance_over_limit':
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = false
         balanceLatestOverLimit.value = true
+        _appendBalanceSeriesPoint(msg.value_mg, msg.timestamp)
         _scheduleBalanceFlush()
         break
       case 'error':
@@ -344,7 +370,7 @@ export const useVoiceStore = defineStore('voice', () => {
 
   return {
     sessionState, messages, asrPartial, pendingIntent, currentDraft, isConnected, errorMsg,
-    balanceMg, balanceStable, balanceOverLimit, audioInited, audioError,
+    balanceMg, balanceStable, balanceOverLimit, balanceSeriesPoints, audioInited, audioError,
     isRecording, isPlaying, stateLabel, micLevel,
     currentSessionId, micError,
     connect, disconnect, switchSession, loadHistory, initAudio, startRecording, stopRecording,

@@ -73,7 +73,7 @@ export type InboundMsg =
   | { type: 'command_sent'; command_id: string }
   | { type: 'command_result'; data: CommandResultPayload }
   | { type: 'balance_reading'; value_mg: number; stable: boolean; timestamp: string }
-  | { type: 'balance_over_limit'; value_mg: number }
+  | { type: 'balance_over_limit'; value_mg: number; timestamp?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'ping'; ts: string }
   | { type: 'state_change'; state: string }
