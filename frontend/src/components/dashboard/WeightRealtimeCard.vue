@@ -15,11 +15,13 @@ const props = defineProps<{
   overLimit: boolean
   points?: WeightPoint[]
   pointsVersion?: number
+  windowMs?: number
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let rafId: number | null = null
+let axisTimer: ReturnType<typeof setInterval> | null = null
 
 const status = computed(() => {
   if (props.overLimit) return { text: '异常', variant: 'danger' as const }
@@ -35,7 +37,11 @@ function formatWeightMg(value: number | null): string {
 function renderChart() {
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
-  const seriesPoints = props.points ?? []
+  const chartWindowMs = props.windowMs ?? 10_000
+  const now = Date.now()
+  const minTs = now - chartWindowMs
+  const maxTs = now
+  const seriesPoints = (props.points ?? []).filter((point) => point.ts >= minTs && point.ts <= maxTs)
   chart.setOption({
     grid: { left: 8, right: 8, top: 10, bottom: 18, containLabel: true },
     tooltip: {
@@ -47,6 +53,8 @@ function renderChart() {
     },
     xAxis: {
       type: 'time',
+      min: minTs,
+      max: maxTs,
       axisLabel: { color: '#94a3b8', fontSize: 10 },
       axisLine: { lineStyle: { color: '#243244' } },
     },
@@ -54,8 +62,9 @@ function renderChart() {
     series: [{
       type: 'line',
       data: seriesPoints.map((point) => [point.ts, point.value]),
-      smooth: false,
+      smooth: 0.25,
       showSymbol: false,
+      sampling: 'lttb',
       lineStyle: { color: '#06b6d4', width: 2 },
       areaStyle: { color: 'rgba(6, 182, 212, 0.12)' },
     }],
@@ -75,9 +84,11 @@ watch(() => props.pointsVersion, scheduleRender)
 
 onMounted(() => {
   renderChart()
+  axisTimer = setInterval(scheduleRender, 1000)
   window.addEventListener('resize', scheduleRender)
 })
 onBeforeUnmount(() => {
+  if (axisTimer) clearInterval(axisTimer)
   window.removeEventListener('resize', scheduleRender)
   if (rafId !== null) cancelAnimationFrame(rafId)
   chart?.dispose()

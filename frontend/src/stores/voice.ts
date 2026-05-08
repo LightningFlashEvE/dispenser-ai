@@ -27,8 +27,8 @@ export interface BalanceSeriesPoint {
 
 const BALANCE_DISPLAY_FLUSH_MS = 100
 const BALANCE_SERIES_FLUSH_MS = 100
-const BALANCE_SERIES_WINDOW_MS = 60_000
-const BALANCE_SERIES_MAX_POINTS = 1_500
+const BALANCE_SERIES_WINDOW_MS = 10_000
+const BALANCE_SERIES_MAX_POINTS = 1_000
 
 export const useVoiceStore = defineStore('voice', () => {
   const sessionState = ref<SessionState>('idle')
