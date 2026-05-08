@@ -10,7 +10,7 @@ interface WeightPoint {
 }
 
 const DEFAULT_WINDOW_MS = 10_000
-const AXIS_REFRESH_MS = 100
+const AXIS_REFRESH_MS = 500
 const AXIS_TICK_MS = 500
 
 const props = defineProps<{
@@ -73,7 +73,10 @@ function renderChart() {
       lineStyle: { color: '#06b6d4', width: 2 },
       areaStyle: { color: 'rgba(6, 182, 212, 0.12)' },
     }],
-    animation: false,
+    animation: true,
+    animationDuration: 0,
+    animationDurationUpdate: AXIS_REFRESH_MS,
+    animationEasingUpdate: 'linear',
   })
 }
 
