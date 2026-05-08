@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef, triggerRef } from 'vue'
 import { VoiceWebSocket, type InboundMsg, type SessionState, type PendingPayload, type DraftPayload, type Correction, type Suggestion } from '@/services/websocket'
 import { AudioRecorder, AudioPlayer, type MicError } from '@/services/audio'
 
@@ -43,7 +43,8 @@ export const useVoiceStore = defineStore('voice', () => {
   const balanceLatestMg = ref<number | null>(null)
   const balanceLatestStable = ref(false)
   const balanceLatestOverLimit = ref(false)
-  const balanceSeriesPoints = ref<BalanceSeriesPoint[]>([])
+  const balanceSeriesPoints = shallowRef<BalanceSeriesPoint[]>([])
+  const balanceSeriesVersion = ref(0)
   const audioInited = ref(false)
   const audioError = ref<string | null>(null)
   const micError = ref<MicError | null>(null)
@@ -106,10 +107,11 @@ export const useVoiceStore = defineStore('voice', () => {
   function _appendBalanceSeriesPoint(value: number, timestamp?: string): void {
     const ts = _parseBalanceTimestamp(timestamp)
     const minTs = ts - BALANCE_SERIES_WINDOW_MS
-    balanceSeriesPoints.value = [
-      ...balanceSeriesPoints.value.filter((point) => point.ts >= minTs),
-      { ts, value },
-    ]
+    const points = balanceSeriesPoints.value
+    points.push({ ts, value })
+    while (points.length > 0 && points[0].ts < minTs) points.shift()
+    triggerRef(balanceSeriesPoints)
+    balanceSeriesVersion.value += 1
   }
 
   const stateLabel = computed<string>(() => {
@@ -370,7 +372,7 @@ export const useVoiceStore = defineStore('voice', () => {
 
   return {
     sessionState, messages, asrPartial, pendingIntent, currentDraft, isConnected, errorMsg,
-    balanceMg, balanceStable, balanceOverLimit, balanceSeriesPoints, audioInited, audioError,
+    balanceMg, balanceStable, balanceOverLimit, balanceSeriesPoints, balanceSeriesVersion, audioInited, audioError,
     isRecording, isPlaying, stateLabel, micLevel,
     currentSessionId, micError,
     connect, disconnect, switchSession, loadHistory, initAudio, startRecording, stopRecording,

@@ -14,6 +14,7 @@ const props = defineProps<{
   stable: boolean
   overLimit: boolean
   points?: WeightPoint[]
+  pointsVersion?: number
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
@@ -70,7 +71,8 @@ function scheduleRender() {
   })
 }
 
-watch(() => props.points, scheduleRender, { deep: true })
+watch(() => props.pointsVersion, scheduleRender)
+watch(() => props.points, scheduleRender)
 
 onMounted(() => {
   renderChart()

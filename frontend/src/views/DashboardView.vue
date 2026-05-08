@@ -31,7 +31,8 @@ const tasksError = ref<string | null>(null)
 const loading = ref(true)
 const activeLogTab = ref('logs')
 let clockTimer: ReturnType<typeof setInterval> | null = null
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+let deviceRefreshTimer: ReturnType<typeof setInterval> | null = null
+let slowRefreshTimer: ReturnType<typeof setInterval> | null = null
 let refreshInFlight = false
 let deviceSnapshot = ''
 let resourcesSnapshot = ''
@@ -189,11 +190,16 @@ function cancelCurrentTask() {
 onMounted(() => {
   refreshDashboard()
   clockTimer = setInterval(() => { now.value = new Date() }, 1000)
-  refreshTimer = setInterval(() => { refreshDashboard(true) }, 1000)
+  deviceRefreshTimer = setInterval(() => { void fetchDevice() }, 1000)
+  slowRefreshTimer = setInterval(() => {
+    void fetchResources()
+    void fetchTasks()
+  }, 5000)
 })
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
-  if (refreshTimer) clearInterval(refreshTimer)
+  if (deviceRefreshTimer) clearInterval(deviceRefreshTimer)
+  if (slowRefreshTimer) clearInterval(slowRefreshTimer)
 })
 </script>
 
@@ -236,6 +242,7 @@ onUnmounted(() => {
           :stable="displayWeightStable"
           :over-limit="displayWeightOverLimit"
           :points="voiceStore.balanceSeriesPoints"
+          :points-version="voiceStore.balanceSeriesVersion"
         />
       </section>
 
