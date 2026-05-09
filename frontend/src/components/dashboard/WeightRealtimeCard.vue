@@ -18,6 +18,7 @@ const props = defineProps<{
   valueMg: number | null
   stable: boolean
   overLimit: boolean
+  sourceStatus?: 'REALTIME' | 'SNAPSHOT' | 'STALE' | 'NO_DATA'
   points?: WeightPoint[]
   pointsVersion?: number
   windowMs?: number
@@ -31,6 +32,8 @@ let axisTimer: ReturnType<typeof setInterval> | null = null
 const status = computed(() => {
   if (props.overLimit) return { text: '异常', variant: 'danger' as const }
   if (props.valueMg === null) return { text: '无数据', variant: 'offline' as const }
+  if (props.sourceStatus === 'STALE') return { text: '实时流中断', variant: 'warn' as const }
+  if (props.sourceStatus === 'SNAPSHOT') return { text: '快照数据', variant: 'info' as const }
   return props.stable ? { text: '稳定', variant: 'ok' as const } : { text: '波动', variant: 'warn' as const }
 })
 
@@ -146,11 +149,11 @@ function renderChart() {
       smooth: 0.2,
       showSymbol: false,
       sampling: 'lttb',
-      lineStyle: { color: props.stable ? '#22c55e' : '#06b6d4', width: 2.2, cap: 'round', join: 'round' },
+      lineStyle: { color: props.sourceStatus === 'STALE' ? '#f59e0b' : props.stable ? '#22c55e' : '#06b6d4', width: 2.2, cap: 'round', join: 'round' },
       areaStyle: {
         opacity: 0.16,
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: props.stable ? 'rgba(34, 197, 94, 0.30)' : 'rgba(6, 182, 212, 0.30)' },
+          { offset: 0, color: props.sourceStatus === 'STALE' ? 'rgba(245, 158, 11, 0.28)' : props.stable ? 'rgba(34, 197, 94, 0.30)' : 'rgba(6, 182, 212, 0.30)' },
           { offset: 1, color: 'rgba(6, 182, 212, 0.02)' },
         ]),
       },
@@ -192,7 +195,9 @@ onBeforeUnmount(() => {
           <span class="text-3xl font-semibold tabular-nums">{{ formatWeightMg(valueMg) }}</span>
           <span class="pb-0.5 text-sm text-muted-foreground">mg</span>
         </div>
-        <div class="mt-2 text-xs text-muted-foreground">10 秒窗口 · 500ms 显示采样</div>
+        <div class="mt-2 text-xs text-muted-foreground">
+          10 秒窗口 · 500ms 显示采样<span v-if="sourceStatus === 'SNAPSHOT' || sourceStatus === 'STALE'"> · 曲线等待实时流</span>
+        </div>
       </div>
       <Badge :variant="status.variant">{{ status.text }}</Badge>
     </div>

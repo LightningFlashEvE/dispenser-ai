@@ -18,7 +18,7 @@ import Separator from '@/components/ui/separator/Separator.vue'
 import Tabs from '@/components/ui/tabs/Tabs.vue'
 import { deviceApi, systemApi, taskApi, type DeviceStatus, type SystemResources, type Task } from '@/services/api'
 import { useVoiceStore } from '@/stores/voice'
-import { resourceBarClass } from '@/lib/status'
+import { balanceSourceStatusDescriptor, resourceBarClass } from '@/lib/status'
 
 const voiceStore = useVoiceStore()
 const now = ref(new Date())
@@ -106,14 +106,22 @@ const taskStatus = computed(() => currentTask.value?.status ?? voiceStore.stateL
 const taskDetail = computed(() => currentTask.value?.task_id || currentTask.value?.command_type || deviceStatus.value?.current_command_id || '暂无任务 ID')
 const aiHealth = computed(() => voiceStore.isConnected ? 'ASR / LLM / TTS 通道在线' : '语音 AI 通道离线')
 const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? lastKnownWeightMg.value ?? null)
+const dataSourceStatus = computed<'REALTIME' | 'SNAPSHOT' | 'STALE' | 'NO_DATA'>(() => {
+  if (voiceStore.balanceStreamFresh && voiceStore.balanceMg !== null) return 'REALTIME'
+  if (deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined) {
+    return voiceStore.balanceMg !== null ? 'STALE' : 'SNAPSHOT'
+  }
+  if (lastKnownWeightMg.value !== null) return 'STALE'
+  return 'NO_DATA'
+})
 const displayWeightStable = computed(() => {
-  if (voiceStore.balanceMg !== null) return voiceStore.balanceStable
-  return displayWeightMg.value !== null
+  return dataSourceStatus.value === 'REALTIME' && voiceStore.balanceStable
 })
 const displayWeightOverLimit = computed(() => {
-  if (voiceStore.balanceMg !== null) return voiceStore.balanceOverLimit
+  if (dataSourceStatus.value === 'REALTIME') return voiceStore.balanceOverLimit
   return false
 })
+const weightStatus = computed(() => balanceSourceStatusDescriptor(dataSourceStatus.value, displayWeightStable.value, displayWeightOverLimit.value))
 const resourceItems = computed(() => {
   if (!resources.value) return []
   return [
@@ -229,7 +237,7 @@ onUnmounted(() => {
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatusCard title="设备在线数量" :value="`${onlineDeviceCount}/6`" :detail="deviceStatus?.device_status || '等待设备状态'" :status="backendOnline ? 'ok' : 'offline'" :icon="Server" />
         <StatusCard title="当前任务状态" :value="taskStatus" :detail="taskDetail" :status="currentTask ? 'info' : 'offline'" :icon="Gauge" />
-        <StatusCard title="当前称重" :value="formatWeightMg(displayWeightMg)" detail="mg" :status="displayWeightOverLimit ? 'danger' : displayWeightStable ? 'ok' : 'warn'" :icon="Scale" />
+        <StatusCard title="当前称重" :value="formatWeightMg(displayWeightMg)" :detail="`${weightStatus.label} · mg`" :status="weightStatus.tone" :icon="Scale" />
         <StatusCard title="今日任务" :value="todayTasks" :detail="`${tasks.length} 条近期记录`" status="info" :icon="CheckCircle2" />
         <StatusCard title="报警数量" :value="alarms.length" :detail="alarms.length ? '需要人工确认' : '暂无报警'" :status="alarms.length ? 'danger' : 'ok'" :icon="AlertTriangle" />
         <StatusCard title="AI 服务" :value="voiceStore.isConnected ? '健康' : '离线'" :detail="aiHealth" :status="voiceStore.isConnected ? 'ok' : 'offline'" :icon="Bot" />
@@ -241,6 +249,7 @@ onUnmounted(() => {
           :value-mg="displayWeightMg"
           :stable="displayWeightStable"
           :over-limit="displayWeightOverLimit"
+          :source-status="dataSourceStatus"
           :points="voiceStore.balanceSeriesPoints"
           :points-version="voiceStore.balanceSeriesVersion"
         />

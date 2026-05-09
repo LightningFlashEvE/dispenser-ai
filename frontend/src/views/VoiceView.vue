@@ -404,7 +404,20 @@ function paramLabel(k: string) { return PARAM_LABELS[k] ?? k }
 function formatParamVal(k: string, v: unknown) { return k.endsWith('_mg') && typeof v === 'number' ? `${v} mg` : String(v) }
 function formatDraftMass(value: unknown, unit: unknown) {
   if (value === null || value === undefined || value === '') return '待补充'
+  const parsed = parseDraftMassValue(value)
+  if (parsed) {
+    return `${formatDraftNumber(parsed.value)} ${parsed.unit ?? unit ?? ''}`.trim()
+  }
   return `${value} ${unit ?? ''}`.trim()
+}
+function parseDraftMassValue(value: unknown): { value: number; unit: string | null } | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return { value, unit: null }
+  const match = String(value).trim().match(/^(\d+(?:\.\d+)?)\s*(mg|g|kg|毫克|克|千克)?$/i)
+  if (!match) return null
+  return { value: Number(match[1]), unit: match[2] ?? null }
+}
+function formatDraftNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value)
 }
 function formatVessels(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) return '待补充'

@@ -29,6 +29,7 @@ const BALANCE_DISPLAY_FLUSH_MS = 500
 const BALANCE_SERIES_FLUSH_MS = 500
 const BALANCE_SERIES_WINDOW_MS = 10_000
 const BALANCE_SERIES_MAX_POINTS = 1_000
+const BALANCE_STREAM_STALE_MS = 1_500
 
 export const useVoiceStore = defineStore('voice', () => {
   const sessionState = ref<SessionState>('idle')
@@ -45,6 +46,8 @@ export const useVoiceStore = defineStore('voice', () => {
   const balanceLatestMg = ref<number | null>(null)
   const balanceLatestStable = ref(false)
   const balanceLatestOverLimit = ref(false)
+  const balanceLastUpdateAt = ref<number | null>(null)
+  const balanceFreshTick = ref(0)
   const balanceSeriesPoints = shallowRef<BalanceSeriesPoint[]>([])
   const balanceSeriesVersion = ref(0)
   const audioInited = ref(false)
@@ -60,10 +63,15 @@ export const useVoiceStore = defineStore('voice', () => {
   let _streamingId: string | null = null
   let _balanceFlushTimer: ReturnType<typeof setTimeout> | null = null
   let _balanceSeriesFlushTimer: ReturnType<typeof setTimeout> | null = null
+  let _balanceFreshTimer: ReturnType<typeof setInterval> | null = null
   let _balanceCooldownUntil = 0
   let _balanceSeriesCooldownUntil = 0
 
   const isPlaying = computed(() => _player.isPlaying)
+  const balanceStreamFresh = computed(() => {
+    void balanceFreshTick.value
+    return balanceLastUpdateAt.value !== null && Date.now() - balanceLastUpdateAt.value <= BALANCE_STREAM_STALE_MS
+  })
 
   function _flushBalanceDisplay(): void {
     balanceMg.value = balanceLatestMg.value
@@ -175,6 +183,11 @@ export const useVoiceStore = defineStore('voice', () => {
         sessionState.value = 'idle'
       }
     })
+    if (!_balanceFreshTimer) {
+      _balanceFreshTimer = setInterval(() => {
+        balanceFreshTick.value += 1
+      }, 500)
+    }
   }
 
   function disconnect(): void {
@@ -190,6 +203,10 @@ export const useVoiceStore = defineStore('voice', () => {
     if (_balanceSeriesFlushTimer) {
       clearTimeout(_balanceSeriesFlushTimer)
       _balanceSeriesFlushTimer = null
+    }
+    if (_balanceFreshTimer) {
+      clearInterval(_balanceFreshTimer)
+      _balanceFreshTimer = null
     }
     _balanceCooldownUntil = 0
     _balanceSeriesCooldownUntil = 0
@@ -300,6 +317,8 @@ export const useVoiceStore = defineStore('voice', () => {
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = msg.stable
         balanceLatestOverLimit.value = false
+        balanceLastUpdateAt.value = Date.now()
+        balanceFreshTick.value += 1
         _appendBalanceSeriesPoint(msg.value_mg, msg.timestamp)
         _scheduleBalanceFlush()
         break
@@ -307,6 +326,8 @@ export const useVoiceStore = defineStore('voice', () => {
         balanceLatestMg.value = msg.value_mg
         balanceLatestStable.value = false
         balanceLatestOverLimit.value = true
+        balanceLastUpdateAt.value = Date.now()
+        balanceFreshTick.value += 1
         _appendBalanceSeriesPoint(msg.value_mg, msg.timestamp)
         _scheduleBalanceFlush()
         break
@@ -414,7 +435,7 @@ export const useVoiceStore = defineStore('voice', () => {
 
   return {
     sessionState, messages, asrPartial, pendingIntent, currentDraft, isConnected, errorMsg,
-    balanceMg, balanceStable, balanceOverLimit, balanceSeriesPoints, balanceSeriesVersion, audioInited, audioError,
+    balanceMg, balanceStable, balanceOverLimit, balanceLastUpdateAt, balanceStreamFresh, balanceSeriesPoints, balanceSeriesVersion, audioInited, audioError,
     isRecording, isPlaying, stateLabel, micLevel,
     currentSessionId, micError,
     connect, disconnect, switchSession, loadHistory, initAudio, startRecording, stopRecording,

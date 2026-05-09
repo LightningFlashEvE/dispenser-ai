@@ -27,6 +27,14 @@ export function balanceStatusDescriptor(valueMg: number | null, stable: boolean,
   return stable ? { label: '稳定', tone: 'ok' } : { label: '波动', tone: 'warn' }
 }
 
+export function balanceSourceStatusDescriptor(source: 'REALTIME' | 'SNAPSHOT' | 'STALE' | 'NO_DATA', stable: boolean, overLimit: boolean): StatusDescriptor {
+  if (overLimit) return { label: '异常 / 超限', tone: 'danger' }
+  if (source === 'NO_DATA') return { label: '等待数据', tone: 'offline' }
+  if (source === 'STALE') return { label: '实时流中断', tone: 'warn' }
+  if (source === 'SNAPSHOT') return { label: '快照数据', tone: 'info' }
+  return stable ? { label: '稳定', tone: 'ok' } : { label: '波动', tone: 'warn' }
+}
+
 export function resourceTone(percent: number): StatusTone {
   if (percent >= 85) return 'danger'
   if (percent >= 70) return 'warn'

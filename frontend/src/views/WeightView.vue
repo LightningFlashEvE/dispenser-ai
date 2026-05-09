@@ -6,7 +6,7 @@ import Badge from '@/components/ui/badge/Badge.vue'
 import Card from '@/components/ui/card/Card.vue'
 import { deviceApi, type DeviceStatus } from '@/services/api'
 import { useVoiceStore } from '@/stores/voice'
-import { balanceStatusDescriptor } from '@/lib/status'
+import { balanceSourceStatusDescriptor } from '@/lib/status'
 
 const voiceStore = useVoiceStore()
 const deviceStatus = ref<DeviceStatus | null>(null)
@@ -21,15 +21,22 @@ function formatWeightMg(value: number | null | undefined): string {
 }
 
 const displayWeightMg = computed(() => voiceStore.balanceMg ?? deviceStatus.value?.current_weight_mg ?? lastKnownWeightMg.value ?? null)
+const dataSourceStatus = computed<'REALTIME' | 'SNAPSHOT' | 'STALE' | 'NO_DATA'>(() => {
+  if (voiceStore.balanceStreamFresh && voiceStore.balanceMg !== null) return 'REALTIME'
+  if (deviceStatus.value?.current_weight_mg !== null && deviceStatus.value?.current_weight_mg !== undefined) {
+    return voiceStore.balanceMg !== null ? 'STALE' : 'SNAPSHOT'
+  }
+  if (lastKnownWeightMg.value !== null) return 'STALE'
+  return 'NO_DATA'
+})
 const displayWeightStable = computed(() => {
-  if (voiceStore.balanceMg !== null) return voiceStore.balanceStable
-  return displayWeightMg.value !== null
+  return dataSourceStatus.value === 'REALTIME' && voiceStore.balanceStable
 })
 const displayWeightOverLimit = computed(() => {
-  if (voiceStore.balanceMg !== null) return voiceStore.balanceOverLimit
+  if (dataSourceStatus.value === 'REALTIME') return voiceStore.balanceOverLimit
   return false
 })
-const status = computed(() => balanceStatusDescriptor(displayWeightMg.value, displayWeightStable.value, displayWeightOverLimit.value))
+const status = computed(() => balanceSourceStatusDescriptor(dataSourceStatus.value, displayWeightStable.value, displayWeightOverLimit.value))
 
 async function fetchDevice() {
   if (refreshInFlight) return
@@ -79,6 +86,7 @@ onUnmounted(() => {
         :value-mg="displayWeightMg"
         :stable="displayWeightStable"
         :over-limit="displayWeightOverLimit"
+        :source-status="dataSourceStatus"
         :points="voiceStore.balanceSeriesPoints"
         :points-version="voiceStore.balanceSeriesVersion"
       />
@@ -92,10 +100,10 @@ onUnmounted(() => {
             当前重量：<span class="font-mono text-foreground">{{ displayWeightMg !== null ? `${formatWeightMg(displayWeightMg)} mg` : '暂无数据' }}</span>
           </div>
           <div class="rounded-md border border-border bg-muted/30 p-3">
-            稳定状态：<span class="text-foreground">{{ displayWeightStable ? '稳定' : '未稳定 / 波动' }}</span>
+            稳定状态：<span class="text-foreground">{{ dataSourceStatus === 'REALTIME' ? (displayWeightStable ? '稳定' : '未稳定 / 波动') : '非实时流，不显示稳定' }}</span>
           </div>
           <div class="rounded-md border border-border bg-muted/30 p-3">
-            数据来源：优先使用 `/ws/voice` 的 `balance_reading` / `balance_over_limit`，缺失时回退到 `/api/device/status.current_weight_mg`。
+            数据来源：<span class="text-foreground">{{ status.label }}</span>。实时流超过 1.5 秒无更新时，数字可回退到 `/api/device/status.current_weight_mg`，但不会显示“稳定”。
           </div>
           <div v-if="displayWeightOverLimit" class="flex gap-2 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-red-200">
             <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
