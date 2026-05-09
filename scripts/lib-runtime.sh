@@ -152,7 +152,7 @@ start_whisper_server() {
     fi
 
     mkdir -p "$(dirname "${WHISPER_LOG_FILE}")"
-    export LD_LIBRARY_PATH="${SCRIPT_DIR}/libs:$(dirname "${WHISPER_BIN}"):${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="${SCRIPT_DIR}/libs:$(dirname "${WHISPER_BIN}"):${LD_LIBRARY_PATH:-}"
     nohup "${WHISPER_BIN}" \
         --model "${WHISPER_MODEL_PATH}" \
         --language "${WHISPER_LANGUAGE}" \
