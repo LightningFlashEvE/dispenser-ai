@@ -2,9 +2,20 @@
 测试 intent router 优先级和容器提取逻辑
 """
 import pytest
-from backend.app.services.intent_router import route_intent
+from backend.app.services.intent_router import route_intent, route_intent_with_llm_fallback
 from backend.app.services.ai_extractor import AIExtractor
+from backend.app.services.draft_manager import DraftManager
 from backend.app.schemas.task_draft_schema import TaskType
+
+
+class FakeRouterLLM:
+    async def _call(self, messages, *, force_json):
+        return '{"route": "clarify", "task_type": null, "confidence": 0.42, "reason": "只有对象没有动作"}'
+
+
+class FakeExtractorLLM:
+    async def _call(self, messages, *, force_json):
+        return '{"patch": {"chemical_name": "氯化钠", "target_mass": 10, "mass_unit": "g", "chemical_id": "CHEM_BAD", "station_id": "ST01"}}'
 
 
 def test_weighing_task_not_misclassified_as_bottle_query():
@@ -53,6 +64,17 @@ def test_vessel_extraction_supports_chinese_bottle_format():
     assert patch.get("target_vessel") == "1号工位"
 
 
+def test_update_task_for_vessel_text_under_active_draft():
+    manager = DraftManager()
+    draft = manager.start("active_vessel_update", TaskType.WEIGHING)
+
+    route = route_intent("放到空瓶1", active_draft=draft)
+
+    assert route.route == "update_task"
+    assert route.task_type == TaskType.WEIGHING
+    assert route.confidence >= 0.80
+
+
 def test_task_verb_overrides_bottle_noun():
     """任务动词应优先于瓶子名词"""
     # "放到空瓶1" 是任务，不是查询
@@ -62,3 +84,42 @@ def test_task_verb_overrides_bottle_noun():
     # "分装到试剂瓶" 是任务，不是查询
     route = route_intent("分装到试剂瓶", active_draft=None)
     assert route.route != "query_bottles"
+
+
+def test_weighing_route_returns_confidence_signals_and_conflict():
+    route = route_intent("我要称10g氯化钠到空瓶1", active_draft=None)
+
+    assert route.route == "start_task"
+    assert route.task_type == TaskType.WEIGHING
+    assert route.confidence >= 0.90
+    assert "weighing_action" in route.signals
+    assert "mass" in route.signals
+    assert "chemical" in route.signals
+    assert "vessel_text" in route.signals
+    assert "bottle_word_with_task" in route.conflicts
+
+
+@pytest.mark.asyncio
+async def test_llm_router_low_confidence_fallback_returns_clarify():
+    route = await route_intent_with_llm_fallback("氯化钠", active_draft=None, llm=FakeRouterLLM())
+
+    assert route.route == "clarify"
+    assert route.confidence == 0.42
+    assert route.reason == "只有对象没有动作"
+
+
+@pytest.mark.asyncio
+async def test_ai_extractor_discards_control_fields_from_llm_output():
+    extractor = AIExtractor(llm=FakeExtractorLLM())
+
+    patch = await extractor.extract_patch(TaskType.WEIGHING, {}, "称10g氯化钠")
+
+    assert patch["chemical_name"] == "氯化钠"
+    assert patch["target_mass"] == 10
+    assert patch["mass_unit"] == "g"
+    assert "chemical_id" not in patch
+    assert "station_id" not in patch
+    assert extractor.last_discarded_fields == {
+        "chemical_id": "CHEM_BAD",
+        "station_id": "ST01",
+    }

@@ -68,7 +68,7 @@ from app.services.dialog.session import Session
 from app.services.dialog.state_machine import get_state_machine
 from app.services.device.control_client import get_control_client
 from app.services.draft_manager import draft_manager
-from app.services.intent_router import route_intent
+from app.services.intent_router import route_intent_with_llm_fallback
 from app.core.config import settings
 from app.ws.manager import ws_manager
 
@@ -385,7 +385,7 @@ async def _process_text_input(
     )
 
     active_draft = draft_manager.get_active(session.session_id)
-    route = route_intent(user_text, active_draft)
+    route = await route_intent_with_llm_fallback(user_text, active_draft, dispatcher.llm)
 
     if route.route == "cancel_task":
         cancelled = draft_manager.cancel(session.session_id)
@@ -468,6 +468,7 @@ async def _process_text_input(
             ai_patch=patch,
             raw_ai_extractor_output=extractor.last_raw_output,
             sanitized_patch=extractor.last_sanitized_patch,
+            discarded_fields=extractor.last_discarded_fields,
             asr=asr,
         )
         draft = draft_manager.apply_patch(
@@ -478,6 +479,7 @@ async def _process_text_input(
             ai_patch=patch,
             raw_ai_extractor_output=extractor.last_raw_output,
             sanitized_patch=extractor.last_sanitized_patch,
+            discarded_fields=extractor.last_discarded_fields,
             asr=asr,
         )
         reply = build_draft_reply(draft)

@@ -45,6 +45,7 @@ class DraftEvent(BaseModel):
     ai_patch: dict[str, Any] | None = None
     raw_ai_extractor_output: str | None = None
     sanitized_patch: dict[str, Any] | None = None
+    discarded_fields: dict[str, Any] | None = None
     applied_patch: dict[str, Any] | None = None
     asr_raw_text: str | None = None
     asr_normalized_text: str | None = None

@@ -28,16 +28,22 @@ ALLOWED_PATCH_FIELDS: dict[TaskType, set[str]] = {
 AI_EXTRACTOR_PROMPT = """\
 你是配药设备的字段提取器，只能从用户本轮话语中提取字段 patch。
 
-规则：
+硬约束：
 1. 只输出 JSON，格式为 {{"patch": {{...}}}}
-2. 用户没有明确说的字段不要输出，或输出 null
-3. 不要判断信息是否完整
-4. 不要生成最终 intent、proposal、command
-5. 不要生成 slot_id、motor_id、pump_id、valve_id 等硬件字段
-6. 不要自动选择化学品规格、工位或容器
+2. 只提取用户本轮明确说出的字段，不要根据常识、历史草稿或上下文推测
+3. 用户没有明确说的字段不要输出，也不要用 null 占位
+4. 不判断 complete / ready_for_review / 是否可执行
+5. 不生成最终 intent、proposal、command 或任何控制指令
+6. 禁止输出 chemical_id、station_id、slot_id、motor_id、pump_id、valve_id、reagent_code、bottle_id
+7. 禁止自动选择化学品规格、工位、槽位、电机、泵、阀门或容器实体 ID
+8. 目标容器只能输出用户原话中的文本，例如 "空瓶1"、"A1"、"1号工位"
+
+允许字段：
+- WEIGHING: chemical_name, target_mass, mass_unit, target_vessel
+- DISPENSING: source_material_text, portion_count, amount_per_portion, amount_unit, target_vessels
 
 任务类型：{task_type}
-当前草稿：{current_draft}
+当前草稿（只用于理解当前任务类型，不可用于补全字段）：{current_draft}
 用户本轮输入：{user_message}
 """
 
@@ -47,6 +53,7 @@ class AIExtractor:
         self._llm = llm
         self.last_raw_output: str | None = None
         self.last_sanitized_patch: dict[str, Any] = {}
+        self.last_discarded_fields: dict[str, Any] = {}
 
     async def extract_patch(
         self,
@@ -59,7 +66,7 @@ class AIExtractor:
             llm_patch = await self._extract_with_llm(task_type, current_draft, user_message)
         rule_patch = _extract_with_rules(task_type, user_message)
         merged_patch = {**rule_patch, **(llm_patch or {})}
-        self.last_sanitized_patch = _sanitize_patch(task_type, merged_patch)
+        self.last_sanitized_patch, self.last_discarded_fields = _sanitize_patch_with_discarded(task_type, merged_patch)
         return self.last_sanitized_patch
 
     async def _extract_with_llm(
@@ -89,16 +96,27 @@ class AIExtractor:
 
 
 def _sanitize_patch(task_type: TaskType, patch: dict[str, Any]) -> dict[str, Any]:
+    clean, _ = _sanitize_patch_with_discarded(task_type, patch)
+    return clean
+
+
+def _sanitize_patch_with_discarded(
+    task_type: TaskType,
+    patch: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     allowed = ALLOWED_PATCH_FIELDS.get(task_type, set())
     clean: dict[str, Any] = {}
+    discarded: dict[str, Any] = {}
     for key, value in patch.items():
         if key not in allowed:
+            discarded[key] = value
             continue
         if value is None or value == "":
             continue
         if key in {"target_mass", "amount_per_portion"}:
             parsed = _parse_amount_value(value)
             if parsed is None:
+                discarded[key] = value
                 continue
             clean[key] = parsed[0]
             unit_key = "mass_unit" if key == "target_mass" else "amount_unit"
@@ -109,7 +127,7 @@ def _sanitize_patch(task_type: TaskType, patch: dict[str, Any]) -> dict[str, Any
             clean[key] = _normalize_unit(str(value))
             continue
         clean[key] = value
-    return clean
+    return clean, discarded
 
 
 def _extract_with_rules(task_type: TaskType, text: str) -> dict[str, Any]:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from app.schemas.task_draft_schema import TaskDraftRecord, TaskType
 
+
+logger = logging.getLogger(__name__)
 
 Route = Literal[
     "normal_chat",
@@ -46,6 +50,46 @@ FORMULA_SELECT_WORDS = ("应用", "使用", "执行", "套用", "选择", "选�
 
 _QUERY_PREFIX_RE = re.compile(r"^(查一下|查下|查询|查查|查|帮我查|帮我|看看|找|搜|有没有)\s*")
 _QUERY_SUFFIX_RE = re.compile(r"\s*(的|了|库存|还有多少|剩多少|还有吗|有吗|在哪|在哪?个工位|位置|量|情况|信息)+$")
+
+LLM_ROUTER_PROMPT = """\
+你是配药设备的意图路由兜底分类器。规则路由已经先运行，只有低置信、冲突或上下文不足时才会调用你。
+
+硬约束：
+1. 只输出 JSON，不要输出解释文本
+2. 只能选择固定枚举 route：start_task、update_task、query_bottles、query_inventory、clarify、normal_chat
+3. task_type 只能是 WEIGHING、DISPENSING、MIXING 或 null
+4. 不生成 command、intent、proposal 或任何执行参数
+5. 不判断任务是否完整，不判断是否 ready_for_review
+6. 只做路由分类；字段提取由 AIExtractor 负责
+
+强规则：
+- 称/称量/称取/称重 优先判断为 start_task + WEIGHING
+- 分装/分料/每份/每管 优先判断为 start_task + DISPENSING
+- “空瓶1”如果出现在称量/分装语句中，是目标容器文本，不是 query_bottles
+- 只有对象没有动作，或表达多义，返回 clarify
+
+输出格式：
+{{
+  "route": "start_task | update_task | query_bottles | query_inventory | clarify | normal_chat",
+  "task_type": "WEIGHING | DISPENSING | MIXING | null",
+  "confidence": 0.0,
+  "reason": ""
+}}
+
+用户输入：{user_text}
+是否有 active draft：{has_active_draft}
+active draft 任务类型：{active_task_type}
+规则路由结果：{rule_result}
+"""
+
+LLM_ALLOWED_ROUTES: set[Route] = {
+    "start_task",
+    "update_task",
+    "query_bottles",
+    "query_inventory",
+    "clarify",
+    "normal_chat",
+}
 
 
 def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) -> RouteResult:
@@ -253,6 +297,105 @@ def route_intent(user_text: str, active_draft: TaskDraftRecord | None = None) ->
         conflicts=tuple(conflicts),
         reason="无明确意图，默认聊天",
     )
+
+
+async def route_intent_with_llm_fallback(
+    user_text: str,
+    active_draft: TaskDraftRecord | None = None,
+    llm: Any | None = None,
+) -> RouteResult:
+    rule_result = route_intent(user_text, active_draft)
+    if llm is None or not _should_use_llm_fallback(rule_result):
+        return rule_result
+
+    llm_result = await _route_with_llm(user_text, active_draft, rule_result, llm)
+    return llm_result or rule_result
+
+
+def _should_use_llm_fallback(result: RouteResult) -> bool:
+    if result.confidence < 0.60:
+        return True
+    if result.use_llm_fallback:
+        return True
+    if "multiple_task_actions" in result.conflicts:
+        return True
+    if result.route == "clarify" and result.reason in {"多义表达", "任务种子但动作不明确"}:
+        return True
+    return False
+
+
+async def _route_with_llm(
+    user_text: str,
+    active_draft: TaskDraftRecord | None,
+    rule_result: RouteResult,
+    llm: Any,
+) -> RouteResult | None:
+    prompt = LLM_ROUTER_PROMPT.format(
+        user_text=user_text,
+        has_active_draft=active_draft is not None,
+        active_task_type=active_draft.task_type.value if active_draft else None,
+        rule_result=json.dumps(_route_result_to_json(rule_result), ensure_ascii=False),
+    )
+    try:
+        raw = await llm._call([{"role": "user", "content": prompt}], force_json=True)
+    except Exception as exc:
+        logger.warning("LLM router fallback failed: %s", exc)
+        return None
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("LLM router fallback returned invalid JSON: %s", raw)
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    route = parsed.get("route")
+    if route not in LLM_ALLOWED_ROUTES:
+        return None
+
+    task_type = _parse_llm_task_type(parsed.get("task_type"))
+    if route in {"start_task", "update_task"} and task_type is None:
+        if active_draft and route == "update_task":
+            task_type = active_draft.task_type
+        else:
+            route = "clarify"
+
+    confidence = parsed.get("confidence")
+    if not isinstance(confidence, int | float):
+        confidence = 0.60
+    confidence = max(0.0, min(1.0, float(confidence)))
+
+    return RouteResult(
+        route=route,
+        task_type=task_type,
+        confidence=confidence,
+        reason=str(parsed.get("reason") or "LLM router fallback"),
+        signals=rule_result.signals,
+        conflicts=rule_result.conflicts,
+        clarification="请再明确一下你要做的是称量、分装、查询，还是普通提问？" if route == "clarify" else None,
+        query_keyword=user_text if route in {"query_bottles", "query_inventory"} else None,
+    )
+
+
+def _route_result_to_json(result: RouteResult) -> dict[str, Any]:
+    return {
+        "route": result.route,
+        "task_type": result.task_type.value if result.task_type else None,
+        "confidence": result.confidence,
+        "reason": result.reason,
+        "signals": list(result.signals),
+        "conflicts": list(result.conflicts),
+    }
+
+
+def _parse_llm_task_type(value: Any) -> TaskType | None:
+    if value in (None, "", "null"):
+        return None
+    try:
+        return TaskType(str(value))
+    except ValueError:
+        return None
 
 
 def _contains_any(text: str, words: tuple[str, ...]) -> bool:
