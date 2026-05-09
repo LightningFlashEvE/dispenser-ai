@@ -84,7 +84,6 @@ check_service "llama-server"   ".llama_server.pid"   "http://127.0.0.1:8080/heal
 check_service "MeloTTS"        ".melotts.pid"         "http://127.0.0.1:8020/health"
 check_service "mock-qt"        ".mock_qt.pid"         "http://127.0.0.1:9000/api/status"
 check_service "backend"        ".backend.pid"         "http://127.0.0.1:8000/health"
-check_service "mcp-server"     ".mcp_server.pid"      ""
 check_frontend
 
 echo ""

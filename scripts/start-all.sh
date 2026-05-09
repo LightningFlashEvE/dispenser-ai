@@ -8,8 +8,7 @@
 #   3. MeloTTS         :8020  TTS
 #   4. mock-qt         :9000  C++ 控制程序模拟（仅开发环境）
 #   5. backend         :8000  FastAPI 主服务
-#   6. mcp-server       stdio  MCP Server（AI 工具调用层）
-#   7. frontend        :5173  Vue 前端（可选，生产环境用构建产物）
+#   6. frontend        :5173  Vue 前端（可选，生产环境用构建产物）
 #
 # 用法:
 #   ./scripts/start-all.sh          # 启动全部（含 mock-qt 和 frontend）
@@ -201,7 +200,7 @@ else
 fi
 
 # ── 5. backend ────────────────────────────────────────────────────
-info "[5/7] backend (FastAPI :8000)"
+info "[5/6] backend (FastAPI :8000)"
 PID_FILE_BE=".backend.pid"
 if is_port_listening 8000 && curl -ksf "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
     ok "backend 已在监听 :8000（运行中）"
@@ -234,40 +233,9 @@ else
     fi
 fi
 
-# ── 6. mcp-server ─────────────────────────────────────────────────
-info "[6/7] mcp-server (stdio 模式)"
-PID_FILE_MCP=".mcp_server.pid"
-if [ -f "${PID_FILE_MCP}" ] && kill -0 "$(cat "${PID_FILE_MCP}")" 2>/dev/null; then
-    ok "mcp-server 已在运行 (PID: $(cat "${PID_FILE_MCP}"))"
-else
-    MCP_PY="${SCRIPT_DIR}/mcp-server/venv/bin/python"
-    if [ ! -x "${MCP_PY}" ]; then
-        # 尝试创建 venv 并安装依赖
-        if [ -d "${SCRIPT_DIR}/mcp-server" ] && [ -f "${SCRIPT_DIR}/mcp-server/requirements.txt" ]; then
-            info "mcp-server venv 不存在，正在创建..."
-            python3 -m venv "${SCRIPT_DIR}/mcp-server/venv" 2>/dev/null || warn "创建 mcp-server venv 失败"
-            if [ -x "${SCRIPT_DIR}/mcp-server/venv/bin/pip" ]; then
-                "${SCRIPT_DIR}/mcp-server/venv/bin/pip" install -q -r "${SCRIPT_DIR}/mcp-server/requirements.txt" 2>/dev/null || warn "安装 mcp-server 依赖失败"
-                MCP_PY="${SCRIPT_DIR}/mcp-server/venv/bin/python"
-            fi
-        fi
-    fi
-
-    if [ -x "${MCP_PY}" ] && [ -f "${SCRIPT_DIR}/mcp-server/server.py" ]; then
-        mkdir -p logs
-        nohup "${MCP_PY}" "${SCRIPT_DIR}/mcp-server/server.py" \
-            >> "${SCRIPT_DIR}/logs/mcp_server.log" 2>&1 &
-        mcp_pid=$!
-        echo "${mcp_pid}" > "${PID_FILE_MCP}"
-        ok "mcp-server 已启动 (PID: ${mcp_pid})"
-    else
-        warn "mcp-server 跳过（venv 或 server.py 不可用）"
-    fi
-fi
-
-# ── 7. frontend ──────────────────────────────────────────────────
+# ── 6. frontend ──────────────────────────────────────────────────
 if [ "${PROD_MODE}" = false ]; then
-    info "[7/7] frontend (Vite dev :5173)"
+    info "[6/6] frontend (Vite dev :5173)"
     PID_FILE_FE=".frontend.pid"
     LAN_IP=$(get_lan_ip)
     FRONTEND_LOCAL_URL="http://localhost:5173"
@@ -325,7 +293,7 @@ if [ "${PROD_MODE}" = false ]; then
         warn "frontend/node_modules 不存在，请先运行: cd frontend && npm install"
     fi
 else
-    info "[7/7] frontend — 生产模式，执行 vite build 重建产物..."
+    info "[6/6] frontend — 生产模式，执行 vite build 重建产物..."
     if [ ! -d "${SCRIPT_DIR}/frontend/node_modules" ]; then
         warn "frontend/node_modules 不存在，请先运行: cd frontend && npm install"
         warn "跳过构建，nginx 将继续使用旧的 dist/"
