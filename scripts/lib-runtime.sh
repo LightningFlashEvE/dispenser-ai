@@ -321,15 +321,61 @@ build_frontend_prod() {
     )
     if [ $? -eq 0 ]; then
         ok "frontend 构建完成 → frontend/dist/"
-        if command -v nginx &>/dev/null && pgrep -x nginx &>/dev/null; then
-            nginx -s reload 2>/dev/null && ok "nginx 已重载，新前端已生效" || warn "nginx reload 失败，请手动执行: sudo nginx -s reload"
-        else
-            info "nginx 未运行，dist 已就绪，nginx 启动后将自动使用新版本"
-        fi
+        ensure_nginx_serving_frontend
     else
         err "frontend 构建失败，请检查 logs/frontend_build.log"
         return 1
     fi
+}
+
+run_nginx_privileged() {
+    if [ "$(id -u)" -eq 0 ]; then
+        nginx "$@"
+        return $?
+    fi
+    command -v sudo >/dev/null 2>&1 || return 1
+    sudo -n nginx "$@"
+}
+
+ensure_nginx_serving_frontend() {
+    if ! command -v nginx &>/dev/null; then
+        warn "未安装 nginx，frontend/dist 已构建但前端不会对外服务"
+        return 1
+    fi
+
+    if ! run_nginx_privileged -t >/dev/null 2>&1; then
+        warn "nginx 配置检查失败，frontend/dist 已构建但前端不会对外服务"
+        warn "请在设备上执行: sudo nginx -t"
+        return 1
+    fi
+
+    if pgrep -x nginx >/dev/null 2>&1; then
+        if run_nginx_privileged -s reload >/dev/null 2>&1; then
+            ok "nginx 已重载，新前端已生效"
+        else
+            warn "nginx reload 失败，请手动执行: sudo nginx -s reload"
+            return 1
+        fi
+    else
+        info "nginx 未运行，正在启动 nginx..."
+        if command -v systemctl &>/dev/null && command -v sudo >/dev/null 2>&1 && sudo -n systemctl start nginx >/dev/null 2>&1; then
+            ok "nginx 已通过 systemctl 启动"
+        elif run_nginx_privileged >/dev/null 2>&1; then
+            ok "nginx 已启动"
+        else
+            warn "nginx 启动失败，frontend/dist 已构建但前端不会对外服务"
+            warn "请在设备上执行: sudo systemctl start nginx"
+            return 1
+        fi
+    fi
+
+    if curl -ksf "https://127.0.0.1/" >/dev/null 2>&1 || curl -sf "http://127.0.0.1/" >/dev/null 2>&1; then
+        ok "frontend 生产入口已就绪"
+        return 0
+    fi
+
+    warn "nginx 进程已启动，但前端生产入口无响应，请检查 /var/log/nginx/error.log"
+    return 1
 }
 
 check_service() {
