@@ -17,7 +17,7 @@
 |------|------|---------|
 | `backend/` | FastAPI 后端，负责 AI、视觉、规则、状态机、天平驱动、数据与协议通信 | [backend/AGENTS.md](backend/AGENTS.md) |
 | `frontend/` | 本地网页前端，工业触摸屏与局域网访问界面 | [frontend/AGENTS.md](frontend/AGENTS.md) |
-| `mcp-server/` | MCP Server，将系统能力封装为 AI 可调用的工具 | 见下方 MCP Server 说明 |
+| `mcp-server/` | 可选 MCP Server，将系统能力封装为外部 AI Client 可调用的工具；不参与主流程，不随 `start-all.sh` 启动 | 见下方 MCP Server 说明 |
 | `shared/` | Schema 契约文件（intent_schema.json + command_schema.json） | 见下方 Schema 说明 |
 | `mock-qt/` | 模拟 C++ 后级控制程序，用于开发联调 | [mock-qt/AGENTS.md](mock-qt/AGENTS.md) |
 | `libs/` | 可选本机二进制资产目录（llama.cpp / whisper.cpp 编译产物 `.so`） | 不进 Git；目标机优先本地编译，必要时从 Release/对象存储下载 |
@@ -339,7 +339,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 ```
 
 ```bash
-# 开发模式：启动全部（含 mock-qt + Vite dev server）
+# 开发模式：启动主系统服务（含 mock-qt + Vite dev server；不启动 mcp-server）
 ./scripts/start-all.sh
 
 # 生产模式：跳过 mock-qt 和 frontend dev server
@@ -401,7 +401,9 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 
 ### 什么是 MCP Server
 
-MCP（Model Context Protocol）Server 将系统的核心能力封装为标准工具接口，AI 可通过 MCP 协议按需调用，实现自然交互 + 选择性调用的工作流。
+MCP（Model Context Protocol）Server 将系统的核心能力封装为标准工具接口，供 Claude Desktop、Cursor、opencode 等外部 AI Client 按需调用。
+
+注意：`mcp-server/` 是可选外部工具接口，不参与当前前端/语音/后端 draft 主流程，`./scripts/start-all.sh` 不会启动它；需要外部 MCP Client 时按下方步骤手动启动。
 
 ### 工具清单
 
