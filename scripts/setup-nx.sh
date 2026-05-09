@@ -11,6 +11,46 @@ NODE_MAJOR="${NODE_MAJOR:-20}"
 
 info() { echo "==> $*"; }
 
+configure_nginx() {
+  local site_name="${NGINX_SITE_NAME:-dispenser-ai}"
+  local ssl_dir="${NGINX_SSL_DIR:-/etc/nginx/ssl}"
+  local cert_path="${NGINX_CERT_PATH:-${ssl_dir}/${site_name}.crt}"
+  local key_path="${NGINX_KEY_PATH:-${ssl_dir}/${site_name}.key}"
+  local site_available="/etc/nginx/sites-available/${site_name}"
+  local site_enabled="/etc/nginx/sites-enabled/${site_name}"
+  local lan_ip="${LAN_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+
+  info "Configuring nginx production frontend"
+  sudo mkdir -p "${ssl_dir}"
+
+  if [ ! -s "${cert_path}" ] || [ ! -s "${key_path}" ]; then
+    local cn="${lan_ip:-localhost}"
+    local san="DNS:localhost,IP:127.0.0.1"
+    if [ -n "${lan_ip}" ]; then
+      san="IP:${lan_ip},${san}"
+    fi
+    sudo openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
+      -keyout "${key_path}" -out "${cert_path}" \
+      -subj "/CN=${cn}" -addext "subjectAltName=${san}" >/dev/null 2>&1
+    info "Created nginx self-signed certificate: ${cert_path}"
+  else
+    info "Using existing nginx certificate: ${cert_path}"
+  fi
+
+  sed \
+    -e "s#/path/to/cert.pem#${cert_path}#g" \
+    -e "s#/path/to/cert.key#${key_path}#g" \
+    -e "s#root /home/lightning/dispenser-ai/frontend/dist;#root ${ROOT_DIR}/frontend/dist;#g" \
+    -e "s#alias /home/lightning/dispenser-ai/frontend/public/worklets/;#alias ${ROOT_DIR}/frontend/public/worklets/;#g" \
+    "${ROOT_DIR}/scripts/nginx-ssl.conf" | sudo tee "${site_available}" >/dev/null
+
+  sudo ln -sf "${site_available}" "${site_enabled}"
+  sudo rm -f /etc/nginx/sites-enabled/default
+  sudo nginx -t
+  sudo systemctl enable --now nginx
+  sudo systemctl reload nginx
+}
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "This setup script is intended for Ubuntu/JetPack systems with apt-get." >&2
   exit 1
@@ -39,6 +79,8 @@ info "Creating backend venv"
 
 info "Installing frontend dependencies"
 npm --prefix "${ROOT_DIR}/frontend" install
+
+configure_nginx
 
 if [ ! -f "${ROOT_DIR}/backend/.env" ]; then
   cp "${ROOT_DIR}/backend/.env.example" "${ROOT_DIR}/backend/.env"

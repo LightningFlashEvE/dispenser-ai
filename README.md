@@ -230,7 +230,7 @@ chmod +x scripts/*.sh llama_server.sh
 ./scripts/setup-runtime.sh
 ```
 
-`setup-nx.sh` 会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv 和前端依赖。`setup-runtime.sh` 会恢复不进 Git 的外部运行时目录：`llama.cpp/`、`whisper.cpp/`、`melotts-git/`。MCP Server 是可选外部工具，如需使用可按下方说明单独安装。
+`setup-nx.sh` 会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv、前端依赖，并配置生产前端 nginx 入口。`setup-runtime.sh` 会恢复不进 Git 的外部运行时目录：`llama.cpp/`、`whisper.cpp/`、`melotts-git/`。MCP Server 是可选外部工具，如需使用可按下方说明单独安装。
 
 等价的核心系统依赖命令如下：
 
@@ -249,6 +249,8 @@ sudo apt install -y \
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
+
+`setup-nx.sh` 会生成本机自签名 HTTPS 证书、安装 `/etc/nginx/sites-available/dispenser-ai`、启用站点、禁用默认站点并启动/reload nginx。生产前端入口为 `https://<jetson-ip>/#/dashboard`。
 
 ### 步骤 3：安装 Python 依赖（后端）
 
@@ -438,7 +440,7 @@ cd ~/dispenser-ai
 ./scripts/start-prod.sh
 ```
 
-后端默认监听 `http://0.0.0.0:8000`。生产模式会跳过 `mock-qt` 和 Vite dev server，并构建前端 `frontend/dist/`。
+后端默认监听 `http://0.0.0.0:8000`。生产模式会跳过 `mock-qt` 和 Vite dev server，构建前端 `frontend/dist/`，并在 nginx 配置有效时自动启动或 reload nginx。前端生产入口为 `https://<jetson-ip>/#/dashboard`。
 
 ### 步骤 12（可选）：配置开机自启（systemd）
 

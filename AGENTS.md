@@ -326,7 +326,7 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 ### 一键启动（推荐）
 
 ```bash
-# Jetson Orin NX 首次部署：安装系统依赖、创建 venv、安装前端依赖
+# Jetson Orin NX 首次部署：安装系统依赖、创建 venv、安装前端依赖、配置 nginx 生产入口
 ./scripts/setup-nx.sh
 
 # 编译/安装不进 Git 的外部运行时：llama.cpp、whisper.cpp、MeloTTS
@@ -374,6 +374,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 - **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp；Jetson Orin NX 使用 `DGGML_CUDA=ON` 与 `CMAKE_CUDA_ARCHITECTURES=87`
 - **mock-qt**：必须使用 `mock-qt/venv/bin/python`（系统 Python 缺少 httpx）
 - **backend venv**：优先运行 `./scripts/setup-nx.sh`；手动安装时使用 `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`
+- **生产前端**：`./scripts/setup-nx.sh` 会安装并配置 nginx、自签名 HTTPS 证书和 `frontend/dist/` 静态站点；生产入口为 `https://<jetson-ip>/#/dashboard`，`./scripts/start-prod.sh` 只负责构建 dist 并启动/reload nginx。
 - **前端麦克风**：`localhost` 可用 HTTP；手机/触摸屏/其他电脑通过局域网 IP 访问时必须使用 HTTPS，否则浏览器会隐藏 `navigator.mediaDevices` 并禁止麦克风。`./scripts/start-dev.sh` 会自动生成 `.certs/vite-dev.crt` / `.certs/vite-dev.key` 并以 HTTPS 启动 Vite。
 - **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git；外部运行时用 `./scripts/setup-runtime.sh` 恢复，模型用 `./scripts/download-models.sh` 恢复
 - **日志目录**：`logs/`，命名格式：`{服务名}.log`
