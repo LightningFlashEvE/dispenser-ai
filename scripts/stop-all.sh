@@ -76,7 +76,7 @@ stop_pid_file "backend"       ".backend.pid"
 stop_pid_file "mock-qt"       ".mock_qt.pid"
 stop_pid_file "MeloTTS"       ".melotts.pid"
 bash llama_server.sh stop
-bash scripts/start-whisper-server.sh stop
+stop_pid_file "whisper-server" ".whisper_server.pid"
 
 echo ""
 ok "所有服务已停止"

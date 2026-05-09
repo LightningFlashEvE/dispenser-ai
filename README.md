@@ -31,11 +31,8 @@
 cp .env.example .env
 ./scripts/download-models.sh
 
-# 一键启动全部服务（含 mock-qt 模拟后级 + Vite 开发服务器）
-./scripts/start-all.sh
-
-# 检查服务状态
-./scripts/status.sh
+# 一键启动测试/开发环境（含 mock-qt 模拟后级 + Vite 开发服务器）
+./scripts/start-dev.sh
 ```
 
 > 模型、虚拟环境、编译产物、日志和本地数据库不进入 Git 仓库。完整说明见 [docs/assets.md](docs/assets.md)。
@@ -61,17 +58,23 @@ cp .env.example .env
 }
 ```
 
-### 单服务控制
+### 运行入口
 
 ```bash
-# LLM 服务
-./llama_server.sh start|stop|restart|status|logs
+# 测试/开发环境启动
+./scripts/start-dev.sh
 
-# ASR 服务
-./scripts/start-whisper-server.sh start|stop|restart|status|logs
+# 生产环境启动
+./scripts/start-prod.sh
 
 # 停止所有服务
 ./scripts/stop-all.sh
+```
+
+LLM 服务仍保留独立控制脚本，便于单独查看模型日志或重启：
+
+```bash
+./llama_server.sh start|stop|restart|status|logs
 ```
 
 ---
@@ -227,7 +230,7 @@ chmod +x scripts/*.sh llama_server.sh
 ./scripts/setup-runtime.sh
 ```
 
-`setup-nx.sh` 会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv、MCP venv 和前端依赖。`setup-runtime.sh` 会恢复不进 Git 的外部运行时目录：`llama.cpp/`、`whisper.cpp/`、`melotts-git/`。
+`setup-nx.sh` 会安装 Ubuntu/JetPack 依赖、Node.js 20、后端 venv 和前端依赖。`setup-runtime.sh` 会恢复不进 Git 的外部运行时目录：`llama.cpp/`、`whisper.cpp/`、`melotts-git/`。MCP Server 是可选外部工具，如需使用可按下方说明单独安装。
 
 等价的核心系统依赖命令如下：
 
@@ -364,9 +367,10 @@ cmake -B build \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target whisper-server -j$(nproc)
 
-# 启动 ASR HTTP 服务
+# whisper-server 会由运行入口统一启动
 cd ~/dispenser-ai
-./scripts/start-whisper-server.sh start
+./scripts/start-dev.sh   # 测试/开发环境
+# 或 ./scripts/start-prod.sh   # 生产环境
 ```
 
 ### 步骤 8：手动安装 MeloTTS（自动脚本失败时）
@@ -431,7 +435,7 @@ python3 -c "import sounddevice as sd; print(sd.query_devices())"
 
 ```bash
 cd ~/dispenser-ai
-./scripts/start-all.sh --prod
+./scripts/start-prod.sh
 ```
 
 后端默认监听 `http://0.0.0.0:8000`。生产模式会跳过 `mock-qt` 和 Vite dev server，并构建前端 `frontend/dist/`。
@@ -673,11 +677,11 @@ dispenser-ai/
 │   ├── hardware_setup.md         # 硬件选型与部署
 │   ├── llm_prompt_design.md      # LLM prompt 设计
 │   └── upgrade-v0.2.md           # v0.2 重构升级手册
-├── scripts/                      # 运维脚本
-│   ├── start-all.sh              # 一键启动全部
+├── scripts/                      # 运维脚本（日常只使用 start-dev/start-prod/stop-all）
+│   ├── start-dev.sh              # 启动测试/开发环境
+│   ├── start-prod.sh             # 启动生产环境
 │   ├── stop-all.sh               # 停止全部服务
-│   ├── status.sh                 # 检查服务状态
-│   └── start-whisper-server.sh   # 启动 ASR 服务
+│   └── lib-runtime.sh            # 内部共享函数，不直接执行
 └── llama_server.sh               # llama.cpp server 控制脚本
 ```
 

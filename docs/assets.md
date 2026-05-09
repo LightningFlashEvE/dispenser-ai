@@ -78,7 +78,7 @@ cp .env.example .env
 ./scripts/setup-nx.sh
 ./scripts/setup-runtime.sh
 ./scripts/download-models.sh
-./scripts/start-all.sh
+./scripts/start-dev.sh
 ```
 
 Windows PowerShell：

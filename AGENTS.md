@@ -17,7 +17,7 @@
 |------|------|---------|
 | `backend/` | FastAPI 后端，负责 AI、视觉、规则、状态机、天平驱动、数据与协议通信 | [backend/AGENTS.md](backend/AGENTS.md) |
 | `frontend/` | 本地网页前端，工业触摸屏与局域网访问界面 | [frontend/AGENTS.md](frontend/AGENTS.md) |
-| `mcp-server/` | 可选 MCP Server，将系统能力封装为外部 AI Client 可调用的工具；不参与主流程，不随 `start-all.sh` 启动 | 见下方 MCP Server 说明 |
+| `mcp-server/` | 可选 MCP Server，将系统能力封装为外部 AI Client 可调用的工具；不参与主流程，不随 `start-dev.sh` 启动 | 见下方 MCP Server 说明 |
 | `shared/` | Schema 契约文件（intent_schema.json + command_schema.json） | 见下方 Schema 说明 |
 | `mock-qt/` | 模拟 C++ 后级控制程序，用于开发联调 | [mock-qt/AGENTS.md](mock-qt/AGENTS.md) |
 | `libs/` | 可选本机二进制资产目录（llama.cpp / whisper.cpp 编译产物 `.so`） | 不进 Git；目标机优先本地编译，必要时从 Release/对象存储下载 |
@@ -265,7 +265,7 @@ LOG_LEVEL=INFO
 export no_proxy="localhost,127.0.0.1,192.168.10.*"
 ```
 
-配置后执行 `source ~/.bashrc` 或重新打开终端生效。`start-all.sh` 脚本已内置 `NO_PROXY` 变量，但用户终端环境变量优先级更高。
+配置后执行 `source ~/.bashrc` 或重新打开终端生效。`start-dev.sh` 脚本已内置 `NO_PROXY` 变量，但用户终端环境变量优先级更高。
 
 ---
 
@@ -285,7 +285,7 @@ export no_proxy="localhost,127.0.0.1,192.168.10.*"
 ### 后端 ↔ whisper-server（ASR HTTP 服务）
 - 地址：`http://127.0.0.1:8081`
 - 接口：`POST /inference`（上传 WAV 音频，返回转写结果）
-- 启动脚本：`scripts/start-whisper-server.sh`
+- 启动方式：随 `scripts/start-dev.sh` / `scripts/start-prod.sh` 一起启动
 
 ### 后端 ↔ C++ 后级控制程序（TCP）
 - `POST http://{CONTROL_ADAPTER_HOST}:{CONTROL_ADAPTER_PORT}/api/command`（下发 command JSON）
@@ -340,33 +340,27 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 
 ```bash
 # 开发模式：启动主系统服务（含 mock-qt + Vite dev server；不启动 mcp-server）
-./scripts/start-all.sh
+./scripts/start-dev.sh
 
 # 生产模式：跳过 mock-qt 和 frontend dev server
-./scripts/start-all.sh --prod
+./scripts/start-prod.sh
 
 # 停止所有服务
 ./scripts/stop-all.sh
-
-# 检查服务状态
-./scripts/status.sh
 ```
 
 ### 单服务控制
 
 ```bash
-# LLM 服务
+# LLM 服务仍保留独立控制脚本，便于查看模型加载日志或单独重启
 ./llama_server.sh start|stop|restart|status|logs
-
-# ASR 服务
-./scripts/start-whisper-server.sh start|stop|restart|status|logs
 ```
 
 ### 手动启动顺序
 
 | 序号 | 服务 | 端口 | 启动命令 | 说明 |
 |------|------|------|---------|------|
-| 1 | whisper-server | 8081 | `./scripts/start-whisper-server.sh start` | ASR，无依赖 |
+| 1 | whisper-server | 8081 | `./scripts/start-dev.sh` / `./scripts/start-prod.sh` 内部启动 | ASR，无依赖 |
 | 2 | llama-server   | 8080 | `./llama_server.sh start` | LLM，GPU 加载约 30-60 秒 |
 | 3 | MeloTTS        | 8020 | `melotts-git/venv/bin/python melotts-git/melo/tts_server.py --port 8020` | TTS |
 | 4 | mock-qt        | 9000 | `mock-qt/venv/bin/python mock-qt/server.py --port 9000` | 后级控制模拟（仅开发）|
@@ -380,10 +374,10 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 - **whisper-server**：PID 保存在 `.whisper_server.pid`，需先编译 whisper.cpp；Jetson Orin NX 使用 `DGGML_CUDA=ON` 与 `CMAKE_CUDA_ARCHITECTURES=87`
 - **mock-qt**：必须使用 `mock-qt/venv/bin/python`（系统 Python 缺少 httpx）
 - **backend venv**：优先运行 `./scripts/setup-nx.sh`；手动安装时使用 `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`
-- **前端麦克风**：`localhost` 可用 HTTP；手机/触摸屏/其他电脑通过局域网 IP 访问时必须使用 HTTPS，否则浏览器会隐藏 `navigator.mediaDevices` 并禁止麦克风。`./scripts/start-all.sh` 会自动生成 `.certs/vite-dev.crt` / `.certs/vite-dev.key` 并以 HTTPS 启动 Vite。
+- **前端麦克风**：`localhost` 可用 HTTP；手机/触摸屏/其他电脑通过局域网 IP 访问时必须使用 HTTPS，否则浏览器会隐藏 `navigator.mediaDevices` 并禁止麦克风。`./scripts/start-dev.sh` 会自动生成 `.certs/vite-dev.crt` / `.certs/vite-dev.key` 并以 HTTPS 启动 Vite。
 - **模型与编译产物**：`models/`、`libs/`、`llama.cpp/`、`whisper.cpp/`、`melotts-git/` 不提交 Git；外部运行时用 `./scripts/setup-runtime.sh` 恢复，模型用 `./scripts/download-models.sh` 恢复
 - **日志目录**：`logs/`，命名格式：`{服务名}.log`
-- **代理绕过**：`start-all.sh` 自动设置 `no_proxy=localhost,...`；手动启动时若系统设置了 HTTP 代理，须在 `~/.bashrc` 中配置 `no_proxy`
+- **代理绕过**：`start-dev.sh` 自动设置 `no_proxy=localhost,...`；手动启动时若系统设置了 HTTP 代理，须在 `~/.bashrc` 中配置 `no_proxy`
 
 ### 服务健康端点
 
@@ -403,7 +397,7 @@ DOWNLOAD_WHISPER_SMALL=1 ./scripts/download-models.sh
 
 MCP（Model Context Protocol）Server 将系统的核心能力封装为标准工具接口，供 Claude Desktop、Cursor、opencode 等外部 AI Client 按需调用。
 
-注意：`mcp-server/` 是可选外部工具接口，不参与当前前端/语音/后端 draft 主流程，`./scripts/start-all.sh` 不会启动它；需要外部 MCP Client 时按下方步骤手动启动。
+注意：`mcp-server/` 是可选外部工具接口，不参与当前前端/语音/后端 draft 主流程，`./scripts/start-dev.sh` 不会启动它；需要外部 MCP Client 时按下方步骤手动启动。
 
 ### 工具清单
 

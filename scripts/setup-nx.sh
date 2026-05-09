@@ -37,11 +37,6 @@ info "Creating backend venv"
 "${ROOT_DIR}/backend/venv/bin/python" -m pip install --upgrade pip wheel setuptools
 "${ROOT_DIR}/backend/venv/bin/pip" install -r "${ROOT_DIR}/backend/requirements.txt"
 
-info "Creating mcp-server venv"
-"${PYTHON_BIN}" -m venv "${ROOT_DIR}/mcp-server/venv"
-"${ROOT_DIR}/mcp-server/venv/bin/python" -m pip install --upgrade pip wheel setuptools
-"${ROOT_DIR}/mcp-server/venv/bin/pip" install -r "${ROOT_DIR}/mcp-server/requirements.txt"
-
 info "Installing frontend dependencies"
 npm --prefix "${ROOT_DIR}/frontend" install
 
@@ -57,4 +52,4 @@ echo "Next steps:"
 echo "  1. Edit backend/.env for your hardware ports and model paths."
 echo "  2. Run scripts/download-models.sh after setting QWEN_GGUF_URL."
 echo "  3. Run scripts/setup-runtime.sh to build llama.cpp/whisper.cpp and install MeloTTS."
-echo "  4. Start services with ./scripts/start-all.sh --prod"
+echo "  4. Start services with ./scripts/start-prod.sh"

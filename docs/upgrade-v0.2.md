@@ -166,8 +166,7 @@ wget -O models/whisper/ggml-small.bin \
 
 ```bash
 cd ~/dispenser-ai
-./scripts/start-all.sh
-./scripts/status.sh
+./scripts/start-dev.sh
 ```
 
 ---
@@ -256,7 +255,7 @@ cd ~/dispenser-ai
 ./scripts/stop-all.sh
 git checkout v0.1.x       # 或之前的标签 / 提交
 cp backend/.env.bak.YYYYMMDD backend/.env
-./scripts/start-all.sh
+./scripts/start-dev.sh
 ```
 
 注意：
